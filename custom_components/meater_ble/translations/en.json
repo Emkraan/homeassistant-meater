@@ -1,0 +1,36 @@
+{
+  "config": {
+    "step": {
+      "bluetooth_confirm": {
+        "description": "Add **{name}** ({address}) — {manufacturer} {model}?\n\nThe probe will be read locally over Bluetooth. No cloud account required.",
+        "title": "Confirm MEATER+ probe"
+      }
+    },
+    "abort": {
+      "already_configured": "This probe is already configured.",
+      "no_devices_found": "No MEATER+ probe found. Make sure the probe is turned on and within Bluetooth range, then try again."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "tip_temp": {
+        "name": "Tip Temperature"
+      },
+      "ambient_temp": {
+        "name": "Ambient Temperature"
+      },
+      "battery": {
+        "name": "Battery"
+      },
+      "cook_state": {
+        "name": "Cook Status",
+        "state": {
+          "idle": "Idle",
+          "cooking": "Cooking",
+          "approaching_target": "Approaching Target",
+          "resting": "Resting"
+        }
+      }
+    }
+  }
+}

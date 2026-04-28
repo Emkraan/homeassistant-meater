@@ -1,0 +1,18 @@
+{
+  "domain": "meater_ble",
+  "name": "MEATER BLE",
+  "codeowners": ["@cmarko89"],
+  "config_flow": true,
+  "dependencies": ["bluetooth"],
+  "bluetooth": [
+    {
+      "service_uuid": "a75cc7fc-c956-488f-ac2a-2dbc08b63a04"
+    }
+  ],
+  "documentation": "https://github.com/Emkraan/homeassistant-meater",
+  "integration_type": "device",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/Emkraan/homeassistant-meater/issues",
+  "requirements": [],
+  "version": "2026.4.0"
+}
