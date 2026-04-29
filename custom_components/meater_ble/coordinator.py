@@ -136,7 +136,8 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
             if ble_device is None:
                 _LOGGER.debug(
                     "MEATER %s not visible yet — waiting %ss before retry",
-                    self.address, _RECONNECT_DELAY,
+                    self.address,
+                    _RECONNECT_DELAY,
                 )
                 await asyncio.sleep(_RECONNECT_DELAY)
                 continue
@@ -166,7 +167,9 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
             except (BleakError, asyncio.TimeoutError) as err:
                 _LOGGER.warning(
                     "MEATER %s connection error (%s) — retrying in %ss",
-                    self.address, err, _RECONNECT_DELAY,
+                    self.address,
+                    err,
+                    _RECONNECT_DELAY,
                 )
             finally:
                 self._client = None

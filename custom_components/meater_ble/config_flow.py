@@ -48,14 +48,16 @@ class MeaterBLEConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             assert self._discovery_info is not None
             return self.async_create_entry(
-                title=self._discovery_info.name or f"MEATER {self._discovery_info.address}",
+                title=self._discovery_info.name
+                or f"MEATER {self._discovery_info.address}",
                 data={CONF_ADDRESS: self._discovery_info.address},
             )
 
         assert self._discovery_info is not None
         self._set_confirm_only()
         placeholders = {
-            "name": self._discovery_info.name or f"MEATER {self._discovery_info.address}",
+            "name": self._discovery_info.name
+            or f"MEATER {self._discovery_info.address}",
             "address": self._discovery_info.address,
             "manufacturer": MANUFACTURER,
             "model": MODEL,

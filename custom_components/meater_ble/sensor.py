@@ -73,8 +73,7 @@ async def async_setup_entry(
     """Add MEATER BLE sensors from a config entry."""
     coordinator: MeaterBLECoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
-        MeaterSensor(coordinator, description)
-        for description in SENSOR_DESCRIPTIONS
+        MeaterSensor(coordinator, description) for description in SENSOR_DESCRIPTIONS
     )
 
 
