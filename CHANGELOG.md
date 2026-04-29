@@ -2,6 +2,12 @@
 
 All notable changes to this integration are documented here.
 
+## [2026.4.4] — 2026-04-29
+
+### Fixed
+
+- HACS icon now displays correctly — added `icon` URL field to `hacs.json`.
+
 ## [2026.4.3] — 2026-04-29
 
 ### Fixed
