@@ -2,6 +2,14 @@
 
 All notable changes to this integration are documented here.
 
+## [2026.4.1] — 2026-04-29
+
+### Changed
+
+- README rewritten with full entity reference, automation examples, troubleshooting table, and protocol documentation.
+- Brand icon added (`custom_components/meater_ble/brand/icon.png`).
+- LICENSE file added (MIT).
+
 ## [2026.4.0] — 2026-04-28
 
 ### Added
