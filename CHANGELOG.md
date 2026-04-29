@@ -2,6 +2,12 @@
 
 All notable changes to this integration are documented here.
 
+## [2026.4.7] — 2026-04-29
+
+### Fixed
+
+- Icon updated to the red MEATER logo mark (wordmark removed) — proper PNG, renders correctly in both HACS and HA.
+
 ## [2026.4.6] — 2026-04-29
 
 ### Fixed
