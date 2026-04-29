@@ -2,6 +2,13 @@
 
 All notable changes to this integration are documented here.
 
+## [2026.4.9] — 2026-04-29
+
+### Added
+
+- HACS one-click install badge in README.
+- PR submitted to home-assistant/brands for official icon registration (will enable HACS store icon once merged).
+
 ## [2026.4.8] — 2026-04-29
 
 ### Fixed
