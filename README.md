@@ -166,9 +166,9 @@ automation:
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| No discovery notification | Probe out of range or off | Turn probe on, bring within 10 m of HA Bluetooth adapter |
-| Entities stuck "unavailable" | Probe moved out of range | Values are retained from the last good read; will recover when in range |
-| `Not reachable at startup` in logs | HA started before probe was on | Integration retries automatically — turn probe on and wait |
+| Entities stuck "unavailable" | MEATER app or Block is connected | **Close the MEATER app and disconnect the Block** — the probe only allows one BLE connection at a time |
+| Entities stuck "unavailable" | Probe out of range or off | Turn probe on, bring within 10 m of HA Bluetooth adapter; integration retries automatically |
+| No discovery notification on first setup | Probe not yet seen by HA BLE scanner | Turn probe on, wait ~30 seconds, check Settings → Devices & Services |
 | Ambient temp reads very high | Probe too close to heat source | Normal behavior; MEATER+ ambient sensor reads radiant heat, not air temp |
 | Battery reads 0% | Probe fully discharged | Charge in the block for 2+ hours |
 

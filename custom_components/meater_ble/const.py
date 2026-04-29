@@ -22,6 +22,5 @@ CHAR_BATTERY = "2adb4877-68d8-4884-bd3c-d83853bf27b8"
 # Ambient decode constants (from ESPHome community reverse-engineering).
 AMBIENT_MIN_OFFSET = 48
 
-# Cook-status temperature thresholds (°C).
-COOK_APPROACHING_DELTA = 10.0   # degrees below target to enter "approaching"
-COOK_REST_DELTA = 2.0           # tip drops this many degrees from peak → resting
+# Cook-status temperature threshold (°C).
+COOK_REST_DELTA = 2.0  # tip drops this many degrees from peak → resting

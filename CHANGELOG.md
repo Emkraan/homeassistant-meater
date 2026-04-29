@@ -2,6 +2,14 @@
 
 All notable changes to this integration are documented here.
 
+## [2026.4.5] — 2026-04-29
+
+### Fixed
+
+- Complete rewrite of BLE connectivity. The MEATER+ probe requires an active persistent GATT connection — passive advertisement scanning does not carry any data. The coordinator now maintains a persistent connection with GATT notify callbacks for real-time updates, matching the ESPHome `ble_client` approach. Entities now populate as soon as a connection is established.
+- **Important:** The MEATER app and Block must be closed/disconnected before HA can connect — the probe supports only one BLE connection at a time.
+- README troubleshooting updated to document the single-connection limitation.
+
 ## [2026.4.4] — 2026-04-29
 
 ### Fixed
