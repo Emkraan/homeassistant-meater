@@ -2,6 +2,12 @@
 
 All notable changes to this integration are documented here.
 
+## [2026.4.6] — 2026-04-29
+
+### Fixed
+
+- README header icon now renders correctly in HACS — switched to `.github/homeassistant-meater.png` relative path, matching the franklinwh pattern.
+
 ## [2026.4.5] — 2026-04-29
 
 ### Fixed
