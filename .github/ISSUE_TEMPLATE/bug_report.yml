@@ -1,0 +1,130 @@
+name: Bug report
+description: Something is broken or behaving unexpectedly in the integration.
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please fill out **every** field — bug reports without versions or logs almost always get closed without a fix.
+
+        ### How to capture the data this form asks for
+
+        **Integration version**
+        Settings → Devices & Services → MEATER BLE (3-dot menu) → *About this integration* → version. Or check `manifest.json` in `custom_components/meater_ble/`.
+
+        **Home Assistant version**
+        Settings → About → Home Assistant Core. Include the install type (Container / OS / Supervised / Core).
+
+        **Debug logs**
+        Add this block to `configuration.yaml`, restart, reproduce the issue, then grab logs from Settings → System → Logs:
+
+        ```yaml
+        logger:
+          default: warning
+          logs:
+            custom_components.meater_ble: debug
+        ```
+
+        Redact your probe's Bluetooth MAC address before pasting if you prefer.
+
+  - type: input
+    id: integration_version
+    attributes:
+      label: Integration version
+      placeholder: "e.g. 2026.4.1"
+    validations:
+      required: true
+
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home Assistant version
+      placeholder: "e.g. 2026.4.3 (OS)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install_method
+    attributes:
+      label: How did you install the integration?
+      options:
+        - HACS (Custom repository)
+        - Manual copy to custom_components/
+        - Other (please specify in description)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: probe_model
+    attributes:
+      label: MEATER probe model
+      options:
+        - MEATER+
+        - MEATER 2 Plus
+        - MEATER Block
+        - Other / unsure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: bluetooth_type
+    attributes:
+      label: Bluetooth adapter type
+      description: How does your HA host connect to Bluetooth?
+      options:
+        - Built-in (e.g. Raspberry Pi, NUC)
+        - USB Bluetooth dongle
+        - ESP32 Bluetooth proxy (ESPHome)
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: probe_distance
+    attributes:
+      label: Approximate distance between probe and Bluetooth adapter
+      placeholder: "e.g. 5 metres, same room"
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the bug. What did you expect, and what actually happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Turn probe on
+        2. Wait for discovery notification
+        3. Click Configure
+        4. Integration loads but entities show "unavailable"
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: |
+        Paste the **debug-level** log output for the time window of the bug.
+        Redact your probe MAC address if preferred. The form auto-wraps in a code block.
+      render: shell
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Pre-submission checklist
+      options:
+        - label: I have searched existing issues and confirmed this is not a duplicate.
+          required: true
+        - label: I am running the latest released version of this integration.
+          required: true
+        - label: I have included debug logs from the time the issue occurred.
+          required: true

@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or discussion
+    url: https://github.com/Emkraan/homeassistant-meater/discussions
+    about: For general questions, setup help, or feature brainstorming, please open a Discussion instead of an Issue.
+  - name: MEATER official support
+    url: https://support.meater.com
+    about: For hardware, account, or app issues that are not specific to this Home Assistant integration.
+  - name: BLE protocol reference
+    url: https://github.com/R00S/meater-in-local-haos
+    about: Community ESPHome config that documents the MEATER+ BLE protocol this integration is based on.

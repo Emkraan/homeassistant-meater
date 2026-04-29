@@ -2,6 +2,12 @@
 
 All notable changes to this integration are documented here.
 
+## [2026.4.2] — 2026-04-29
+
+### Added
+
+- GitHub issue templates — structured bug report (probe model, BLE adapter type, distance, logs) and feature request (with BLE vs cloud data distinction), plus `config.yml` disabling blank issues and linking to Discussions and MEATER support.
+
 ## [2026.4.1] — 2026-04-29
 
 ### Changed
