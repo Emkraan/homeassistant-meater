@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Emkraan/homeassistant-meater/main/custom_components/meater_ble/brand/icon.png" alt="MEATER BLE" width="120" />
+  <img src=".github/homeassistant-meater.png" alt="MEATER BLE" width="120" />
 </p>
 
 <h1 align="center">MEATER BLE — Home Assistant Integration</h1>
