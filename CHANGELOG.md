@@ -2,6 +2,12 @@
 
 All notable changes to this integration are documented here.
 
+## [2026.4.8] — 2026-04-29
+
+### Fixed
+
+- README header image uses absolute raw.githubusercontent.com URL — fixes broken image in HACS.
+
 ## [2026.4.7] — 2026-04-29
 
 ### Fixed
