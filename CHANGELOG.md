@@ -2,6 +2,12 @@
 
 All notable changes to this integration are documented here.
 
+## [2026.4.3] — 2026-04-29
+
+### Fixed
+
+- Removed startup GATT read. The integration now sets up cleanly regardless of whether the probe is powered on or in range at boot. Entities start as unavailable and populate on the first BLE broadcast — no "Failed setup, will retry" message.
+
 ## [2026.4.2] — 2026-04-29
 
 ### Added
