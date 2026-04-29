@@ -1,6 +1,5 @@
 {
   "name": "MEATER BLE",
   "render_readme": true,
-  "homeassistant": "2023.12.0",
-  "content_in_root": true
+  "homeassistant": "2023.12.0"
 }

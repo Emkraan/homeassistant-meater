@@ -2,6 +2,12 @@
 
 All notable changes to this integration are documented here.
 
+## [2026.4.10] — 2026-04-29
+
+### Fixed
+
+- Remove `content_in_root` from `hacs.json` — caused HACS to look for `manifest.json` in the repo root instead of `custom_components/meater_ble/`, breaking installation.
+
 ## [2026.4.9] — 2026-04-29
 
 ### Added
