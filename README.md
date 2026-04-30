@@ -16,7 +16,11 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" alt="License"></a>
 </p>
 
-> ⚠️ This is an unofficial integration and is not affiliated with Apption Labs or MEATER.
+<div align="center">
+
+⚠️ 🚨 **This is an unofficial integration and is not affiliated with or endorsed by Apption Labs or MEATER.** 🚨 ⚠️
+
+</div>
 
 ---
 
