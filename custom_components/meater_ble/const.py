@@ -22,5 +22,11 @@ CHAR_BATTERY = "2adb4877-68d8-4884-bd3c-d83853bf27b8"
 # Ambient decode constants (from ESPHome community reverse-engineering).
 AMBIENT_MIN_OFFSET = 48
 
+# Plausible ambient range (°C). Readings outside this are corrupt BLE packets
+# and are discarded so a single bad packet cannot spike the sensor graph.
+# Ceiling sits well above the rated ~275 °C to allow high-heat grilling/searing.
+AMBIENT_TEMP_MIN_C = -20.0
+AMBIENT_TEMP_MAX_C = 600.0
+
 # Cook-status temperature threshold (°C).
 COOK_REST_DELTA = 2.0  # tip drops this many degrees from peak → resting

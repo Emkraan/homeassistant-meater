@@ -2,6 +2,16 @@
 
 All notable changes to this integration are documented here.
 
+## [2026.6.0] — 2026-06-09
+
+### Fixed
+
+- **Ambient temperature reading 1000 °C+** ([#1](https://github.com/Emkraan/homeassistant-meater/issues/1), reported by @dugite-code). The ambient decode was adding a raw-ADC-scale correction term to an already-Celsius tip value and never converting the result back down, so a ~180 °C oven decoded into the thousands. Ambient is now computed entirely on the raw scale from the raw tip value and converted to Celsius once, matching the ESPHome community decode.
+
+### Added
+
+- Out-of-range guard: ambient readings outside −20 °C to 600 °C are treated as corrupt BLE packets and discarded, so the sensor holds its last good value instead of spiking the graph.
+
 ## [2026.4.10] — 2026-04-29
 
 ### Fixed

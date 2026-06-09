@@ -27,6 +27,8 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .const import (
     AMBIENT_MIN_OFFSET,
+    AMBIENT_TEMP_MAX_C,
+    AMBIENT_TEMP_MIN_C,
     CHAR_BATTERY,
     CHAR_TEMPERATURE,
     COOK_REST_DELTA,
@@ -57,12 +59,21 @@ def _decode_tip(data: bytes) -> float:
     return (raw + 8.0) / 16.0
 
 
-def _decode_ambient(data: bytes, tip: float) -> float:
-    """Decode ambient temperature (°C) from the 6-byte temperature characteristic."""
+def _decode_ambient(data: bytes) -> float:
+    """Decode ambient temperature (°C) from the 6-byte temperature characteristic.
+
+    The ambient correction is computed on the raw ADC scale using the raw tip
+    value, then the whole result is converted to Celsius once via (x + 8) / 16 —
+    matching the ESPHome community decode. Feeding it the already-converted tip
+    (and skipping the final conversion) is what produced 1000 °C+ readings.
+    """
+    tip_raw = data[0] + (data[1] << 8)
     ra = data[2] + (data[3] << 8)
     oa = data[4] + (data[5] << 8)
-    correction = max(0.0, ((ra - min(AMBIENT_MIN_OFFSET, oa)) * 16 * 589) / 1487)
-    return tip + correction + 8.0 / 16.0
+    raw_ambient = tip_raw + max(
+        0.0, ((ra - min(AMBIENT_MIN_OFFSET, oa)) * 16 * 589) / 1487
+    )
+    return (raw_ambient + 8.0) / 16.0
 
 
 def _decode_battery(data: bytes) -> int:
@@ -217,7 +228,15 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
     def _process(self, temp_raw: bytes, batt_raw: bytes | None) -> None:
         """Decode raw bytes and push an update to all listeners."""
         tip = _decode_tip(temp_raw)
-        ambient = _decode_ambient(temp_raw, tip)
+        ambient = _decode_ambient(temp_raw)
+        if not AMBIENT_TEMP_MIN_C <= ambient <= AMBIENT_TEMP_MAX_C:
+            # Corrupt BLE packet — keep the last good value rather than spiking.
+            _LOGGER.warning(
+                "MEATER %s: implausible ambient %.1f°C decoded — discarding packet",
+                self.address,
+                ambient,
+            )
+            return
         battery = (
             _decode_battery(batt_raw)
             if batt_raw is not None
