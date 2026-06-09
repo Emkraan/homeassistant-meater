@@ -2,6 +2,16 @@
 
 All notable changes to this integration are documented here.
 
+## [2026.6.1] — 2026-06-09
+
+### Changed
+
+- Clarified that the integration supports both the original **MEATER** and the **MEATER+** (they share the same BLE protocol) — branding and config-flow text updated from "MEATER+" to "MEATER". The original MEATER reported in [#1](https://github.com/Emkraan/homeassistant-meater/issues/1) was already supported.
+
+### Documentation
+
+- README now states explicitly that **MEATER Pro / MEATER 2 Plus are not supported** — they use a different BLE protocol (12-byte temperature payload, different service UUID). Tracked in [#2](https://github.com/Emkraan/homeassistant-meater/issues/2).
+
 ## [2026.6.0] — 2026-06-09
 
 ### Fixed

@@ -5,7 +5,7 @@
 <h1 align="center">MEATER BLE — Home Assistant Integration</h1>
 
 <p align="center">
-  Local Bluetooth integration for MEATER+ wireless meat thermometer probes.<br>
+  Local Bluetooth integration for MEATER and MEATER+ wireless meat thermometer probes.<br>
   No cloud. No ESP32. No ESPHome. Just HA and your probe.
 </p>
 
@@ -40,7 +40,7 @@
 
 ## Features
 
-- **Fully local** — communicates directly with the MEATER+ probe over Bluetooth. No MEATER cloud account or internet connection required.
+- **Fully local** — communicates directly with the MEATER / MEATER+ probe over Bluetooth. No MEATER cloud account or internet connection required.
 - **Auto-discovery** — Home Assistant detects the probe automatically via its BLE service UUID and presents a one-click setup notification.
 - **Real-time updates** — passive BLE scan triggers a coordinator refresh whenever the probe broadcasts, rather than waiting for a fixed poll interval.
 - **No extra hardware** — works with any Bluetooth adapter visible to HA (built-in, USB dongle, or an [ESP32 Bluetooth proxy](https://esphome.io/components/bluetooth_proxy.html)).
@@ -55,7 +55,7 @@
 |---|---|
 | Home Assistant | **2023.12** or newer |
 | Bluetooth | Any adapter accessible to HA — built-in, USB, or ESP32 Bluetooth proxy |
-| Hardware | **MEATER+** probe (MEATER 2 Plus may work — not yet confirmed) |
+| Hardware | Original **MEATER** or **MEATER+** probe. **MEATER Pro / MEATER 2 Plus are _not_ supported** — they use a different BLE protocol (12-byte payload); tracked in [#2](https://github.com/Emkraan/homeassistant-meater/issues/2). |
 
 ---
 
@@ -85,7 +85,7 @@ Or manually:
 
 ## Configuration
 
-Turn on your MEATER+ probe and bring it within Bluetooth range of your HA host. Within a few seconds, a notification will appear under **Settings → Devices & Services**:
+Turn on your MEATER probe and bring it within Bluetooth range of your HA host. Within a few seconds, a notification will appear under **Settings → Devices & Services**:
 
 > *New device discovered: MEATER …*
 
@@ -179,7 +179,7 @@ automation:
 | Entities stuck "unavailable" | MEATER app or Block is connected | **Close the MEATER app and disconnect the Block** — the probe only allows one BLE connection at a time |
 | Entities stuck "unavailable" | Probe out of range or off | Turn probe on, bring within 10 m of HA Bluetooth adapter; integration retries automatically |
 | No discovery notification on first setup | Probe not yet seen by HA BLE scanner | Turn probe on, wait ~30 seconds, check Settings → Devices & Services |
-| Ambient temp reads very high | Probe too close to heat source | Normal behavior; MEATER+ ambient sensor reads radiant heat, not air temp |
+| Ambient temp reads very high | Probe too close to heat source | Normal behavior; the MEATER ambient sensor reads radiant heat, not air temp |
 | Battery reads 0% | Probe fully discharged | Charge in the block for 2+ hours |
 
 Enable debug logging with:
@@ -194,7 +194,7 @@ logger:
 
 ## How It Works
 
-The MEATER+ probe continuously broadcasts BLE advertisements. This integration registers a **passive BLE listener** for the MEATER service UUID (`a75cc7fc-c956-488f-ac2a-2dbc08b63a04`) using HA's native Bluetooth stack. When the probe is detected, it connects briefly via GATT to read two characteristics:
+The MEATER / MEATER+ probe continuously broadcasts BLE advertisements. This integration registers a **passive BLE listener** for the MEATER service UUID (`a75cc7fc-c956-488f-ac2a-2dbc08b63a04`) using HA's native Bluetooth stack. When the probe is detected, it connects briefly via GATT to read two characteristics:
 
 | Characteristic UUID | Content |
 |---|---|

@@ -1,8 +1,9 @@
 """DataUpdateCoordinator for the MEATER BLE integration.
 
-The MEATER+ probe exposes temperature and battery data exclusively via GATT —
-there is nothing in the advertisement payload. It supports only one concurrent
-BLE connection, so the MEATER app or Block must be closed before HA can connect.
+The original MEATER and MEATER+ probes expose temperature and battery data
+exclusively via GATT — there is nothing in the advertisement payload. They
+support only one concurrent BLE connection, so the MEATER app or Block must be
+closed before HA can connect.
 
 This coordinator maintains a persistent BLE connection and uses GATT notify
 to receive characteristic updates in real time, mirroring the ESPHome ble_client
@@ -45,7 +46,7 @@ _RECONNECT_DELAY = 10.0
 
 @dataclass
 class MeaterData:
-    """Snapshot of decoded MEATER+ probe data."""
+    """Snapshot of decoded MEATER / MEATER+ probe data."""
 
     tip_temp: float | None
     ambient_temp: float | None
@@ -93,7 +94,7 @@ def _derive_cook_state(tip: float, prev_state: str, prev_tip: float | None) -> s
 
 
 class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
-    """Maintains a persistent GATT connection to a MEATER+ probe."""
+    """Maintains a persistent GATT connection to a MEATER / MEATER+ probe."""
 
     def __init__(self, hass: HomeAssistant, address: str) -> None:
         """Initialize."""

@@ -18,8 +18,8 @@ class MeaterBLEConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for MEATER BLE.
 
     The flow is triggered automatically when HA's Bluetooth integration detects
-    a MEATER+ advertisement matching the service UUID declared in manifest.json.
-    The user just confirms — no credentials needed.
+    a MEATER / MEATER+ advertisement matching the service UUID declared in
+    manifest.json. The user just confirms — no credentials needed.
     """
 
     VERSION = 1
@@ -31,7 +31,7 @@ class MeaterBLEConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_bluetooth(
         self, discovery_info: BluetoothServiceInfoBleak
     ) -> ConfigFlowResult:
-        """Handle a discovered MEATER+ probe."""
+        """Handle a discovered MEATER / MEATER+ probe."""
         await self.async_set_unique_id(discovery_info.address)
         self._abort_if_unique_id_configured()
 
