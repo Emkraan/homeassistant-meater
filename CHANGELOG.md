@@ -2,6 +2,17 @@
 
 All notable changes to this integration are documented here.
 
+## [2026.6.2] — 2026-06-28
+
+### Added
+
+- **MEATER Pro / MEATER 2 Plus support** ([#2](https://github.com/Emkraan/homeassistant-meater/issues/2), reported by @itsaw). The Pro probe advertises under a new BLE service UUID (`c9e2746c-…`) and delivers a 12-byte temperature payload (6 × signed int16 LE, one per sensor) instead of 6 bytes. Tip is decoded from sensor T0 (bytes 0-1) and ambient from sensor T5 (bytes 10-11), using the confirmed formula `raw / 32.0`. Temperature formula and sensor layout validated by community testing ([yyrliu/meater-pro-display](https://github.com/yyrliu/meater-pro-display)).
+- Auto-discovery now matches both the original MEATER/MEATER+ service UUID and the MEATER Pro service UUID.
+
+### Known limitation
+
+- **Battery is not decoded for MEATER Pro**: the 5-byte battery payload format is not yet confirmed. The battery sensor will show unavailable on MEATER Pro until a future release adds the decode. Raw bytes are logged at DEBUG level to help gather data.
+
 ## [2026.6.1] — 2026-06-09
 
 ### Changed

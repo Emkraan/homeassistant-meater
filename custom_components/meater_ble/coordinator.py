@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 import logging
+import struct
 
 from bleak import BleakClient
 from bleak.backends.characteristic import BleakGATTCharacteristic
@@ -81,6 +82,37 @@ def _decode_battery(data: bytes) -> int:
     """Decode battery percentage from the 2-byte battery characteristic."""
     raw = data[0] + (data[1] << 8)
     return min(100, raw * 10)
+
+
+# ---------------------------------------------------------------------------
+# MEATER Pro / MEATER 2 Plus decoders
+# ---------------------------------------------------------------------------
+# The Pro probe uses the same characteristic UUIDs as the original but packs
+# 6 sensors into a single 12-byte notification: 6 × signed int16 little-endian.
+# T0 (bytes 0-1) = innermost tip sensor; T5 (bytes 10-11) = ambient (ceramic end).
+# Formula confirmed by community testing: tempC = raw_int16 / 32.0
+# (see github.com/yyrliu/meater-pro-display for test data).
+
+
+def _decode_tip_pro(data: bytes) -> float:
+    """Decode tip temperature (°C) from the 12-byte MEATER Pro characteristic."""
+    (raw,) = struct.unpack_from("<h", data, 0)
+    return raw / 32.0
+
+
+def _decode_ambient_pro(data: bytes) -> float:
+    """Decode ambient temperature (°C) from the 12-byte MEATER Pro characteristic."""
+    (raw,) = struct.unpack_from("<h", data, 10)
+    return raw / 32.0
+
+
+def _decode_battery_pro(data: bytes) -> int | None:
+    """Battery decode for MEATER Pro 5-byte format — not yet confirmed.
+
+    The raw bytes are logged at DEBUG level to help gather data for decoding.
+    Returns None until the formula is validated.
+    """
+    return None
 
 
 def _derive_cook_state(tip: float, prev_state: str, prev_tip: float | None) -> str:
@@ -217,7 +249,18 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
         """Handle a battery characteristic notification."""
         if self.data is None:
             return
-        battery = _decode_battery(bytes(data))
+        raw = bytes(data)
+        if len(raw) == 5:
+            _LOGGER.debug(
+                "MEATER Pro %s battery raw (5 bytes): %s — decode not yet confirmed",
+                self.address,
+                raw.hex("-"),
+            )
+            battery = _decode_battery_pro(raw)
+        else:
+            battery = _decode_battery(raw)
+        if battery is None:
+            return
         updated = MeaterData(
             tip_temp=self.data.tip_temp,
             ambient_temp=self.data.ambient_temp,
@@ -228,8 +271,12 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
 
     def _process(self, temp_raw: bytes, batt_raw: bytes | None) -> None:
         """Decode raw bytes and push an update to all listeners."""
-        tip = _decode_tip(temp_raw)
-        ambient = _decode_ambient(temp_raw)
+        if len(temp_raw) == 12:
+            tip = _decode_tip_pro(temp_raw)
+            ambient = _decode_ambient_pro(temp_raw)
+        else:
+            tip = _decode_tip(temp_raw)
+            ambient = _decode_ambient(temp_raw)
         if not AMBIENT_TEMP_MIN_C <= ambient <= AMBIENT_TEMP_MAX_C:
             # Corrupt BLE packet — keep the last good value rather than spiking.
             _LOGGER.warning(
@@ -238,11 +285,18 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
                 ambient,
             )
             return
-        battery = (
-            _decode_battery(batt_raw)
-            if batt_raw is not None
-            else (self.data.battery if self.data else None)
-        )
+        if batt_raw is not None:
+            if len(batt_raw) == 5:
+                _LOGGER.debug(
+                    "MEATER Pro %s battery raw (5 bytes): %s — decode not yet confirmed",
+                    self.address,
+                    batt_raw.hex("-"),
+                )
+                battery = _decode_battery_pro(batt_raw)
+            else:
+                battery = _decode_battery(batt_raw)
+        else:
+            battery = self.data.battery if self.data else None
         prev_state = self.data.cook_state if self.data else "idle"
         prev_tip = self.data.tip_temp if self.data else None
         cook_state = _derive_cook_state(tip, prev_state, prev_tip)

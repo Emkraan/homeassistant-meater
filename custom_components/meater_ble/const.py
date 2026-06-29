@@ -6,14 +6,17 @@ from homeassistant.const import Platform
 
 DOMAIN = "meater_ble"
 MANUFACTURER = "Apption Labs"
-MODEL = "MEATER / MEATER+"
+MODEL = "MEATER / MEATER+ / MEATER Pro"
 
 PLATFORMS: list[Platform] = [Platform.SENSOR]
 
-# BLE service UUID that identifies an original MEATER / MEATER+ probe
-# advertisement. (The MEATER Pro / MEATER 2 Plus uses a different service UUID
-# and a 12-byte temperature payload — not yet supported; see issue #2.)
+# BLE service UUID — original MEATER / MEATER+.
 MEATER_SERVICE_UUID = "a75cc7fc-c956-488f-ac2a-2dbc08b63a04"
+
+# BLE service UUID — MEATER Pro / MEATER 2 Plus probe (advertises as "MEATER+" when
+# removed from its charger). Same characteristic UUIDs as the original but delivers a
+# 12-byte temperature payload (6 × signed int16 LE) and a 5-byte battery payload.
+MEATER_PRO_SERVICE_UUID = "c9e2746c-59f1-4e54-a0dd-e1e54555cf8b"
 
 # GATT characteristic: 6 bytes — tip(2) + raw_ambient(2) + offset_ambient(2).
 CHAR_TEMPERATURE = "7edda774-045e-4bbf-909b-45d1991a2876"
