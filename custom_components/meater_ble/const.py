@@ -13,9 +13,15 @@ PLATFORMS: list[Platform] = [Platform.SENSOR]
 # BLE service UUID — original MEATER / MEATER+.
 MEATER_SERVICE_UUID = "a75cc7fc-c956-488f-ac2a-2dbc08b63a04"
 
-# BLE service UUID — MEATER Pro / MEATER 2 Plus probe (advertises as "MEATER+" when
-# removed from its charger). Same characteristic UUIDs as the original but delivers a
-# 12-byte temperature payload (6 × signed int16 LE) and a 5-byte battery payload.
+# BLE service UUID — MEATER Pro / MEATER 2 Plus probe (advertises local name "MEATER+"
+# when removed from its charger). Same characteristic UUIDs as the original but delivers
+# a 12-byte temperature payload (6 × signed int16 LE) and a 5-byte battery payload.
+#
+# NOTE: this UUID is a GATT service UUID, discovered by connecting and enumerating
+# services — it is NOT present in the Pro's advertisement payload, so HA's bluetooth
+# service_uuid matcher never fires on it (see #3). It's kept in the manifest matcher
+# list in case a firmware revision does advertise it, but the local_name="MEATER*"
+# matcher in manifest.json is what actually discovers Pro/2 Plus probes today.
 MEATER_PRO_SERVICE_UUID = "c9e2746c-59f1-4e54-a0dd-e1e54555cf8b"
 
 # GATT characteristic: 6 bytes — tip(2) + raw_ambient(2) + offset_ambient(2).

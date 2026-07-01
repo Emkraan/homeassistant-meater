@@ -55,7 +55,7 @@
 |---|---|
 | Home Assistant | **2023.12** or newer |
 | Bluetooth | Any adapter accessible to HA — built-in, USB, or ESP32 Bluetooth proxy |
-| Hardware | Original **MEATER** or **MEATER+** probe. **MEATER Pro / MEATER 2 Plus are _not_ supported** — they use a different BLE protocol (12-byte payload); tracked in [#2](https://github.com/Emkraan/homeassistant-meater/issues/2). |
+| Hardware | Original **MEATER**, **MEATER+**, **MEATER Pro**, or **MEATER 2 Plus** probe. |
 
 ---
 
@@ -194,7 +194,7 @@ logger:
 
 ## How It Works
 
-The MEATER / MEATER+ probe continuously broadcasts BLE advertisements. This integration registers a **passive BLE listener** for the MEATER service UUID (`a75cc7fc-c956-488f-ac2a-2dbc08b63a04`) using HA's native Bluetooth stack. When the probe is detected, it connects briefly via GATT to read two characteristics:
+The probe continuously broadcasts BLE advertisements. This integration registers a **passive BLE listener** with HA's native Bluetooth stack, matching on the original MEATER/MEATER+ service UUID (`a75cc7fc-c956-488f-ac2a-2dbc08b63a04`) and, since Pro/2 Plus firmware doesn't reliably advertise a service UUID, on advertised local name (`MEATER*`). When the probe is detected, it connects briefly via GATT to read two characteristics:
 
 | Characteristic UUID | Content |
 |---|---|

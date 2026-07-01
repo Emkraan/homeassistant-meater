@@ -10,6 +10,9 @@
     },
     {
       "service_uuid": "c9e2746c-59f1-4e54-a0dd-e1e54555cf8b"
+    },
+    {
+      "local_name": "MEATER*"
     }
   ],
   "documentation": "https://github.com/Emkraan/homeassistant-meater",
@@ -17,5 +20,5 @@
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/Emkraan/homeassistant-meater/issues",
   "requirements": [],
-  "version": "2026.6.2"
+  "version": "2026.6.3"
 }

@@ -2,6 +2,12 @@
 
 All notable changes to this integration are documented here.
 
+## [2026.6.3] — 2026-07-01
+
+### Fixed
+
+- **MEATER Pro / MEATER 2 Plus never discovered** ([#3](https://github.com/Emkraan/homeassistant-meater/issues/3), reported by @finity69x2). The service UUID added for Pro support in 2026.6.2 (`c9e2746c-…`) was captured by connecting to the probe and enumerating its GATT services — it is not actually present in the probe's BLE advertisement, so HA's `service_uuid` bluetooth matcher never fired and the config-flow discovery notification never appeared, even with the probe clearly visible to an ESPHome Bluetooth proxy. Auto-discovery now also matches on advertised local name (`MEATER*`), which the Pro/2 Plus does broadcast, so discovery works regardless of which service UUIDs a given firmware revision advertises.
+
 ## [2026.6.2] — 2026-06-28
 
 ### Added
