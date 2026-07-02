@@ -91,6 +91,8 @@ Turn on your MEATER probe and bring it within Bluetooth range of your HA host. W
 
 Click **Configure** → **Submit** to add it. No credentials needed.
 
+**Don't see the notification?** Some probes (notably the MEATER Pro / MEATER 2 Plus) only broadcast their name and service UUID intermittently, and a Bluetooth proxy may not forward that part of the advertisement — so auto-discovery can be hit-or-miss. Add the probe manually instead: **Settings → Devices & Services → + Add Integration → MEATER BLE**. Take the probe out of its charger first; then pick it from the list. If it isn't listed by name, it will still appear by its MAC address.
+
 Each probe becomes its own device in HA, identified by its Bluetooth MAC address.
 
 ---
@@ -179,6 +181,7 @@ automation:
 | Entities stuck "unavailable" | MEATER app or Block is connected | **Close the MEATER app and disconnect the Block** — the probe only allows one BLE connection at a time |
 | Entities stuck "unavailable" | Probe out of range or off | Turn probe on, bring within 10 m of HA Bluetooth adapter; integration retries automatically |
 | No discovery notification on first setup | Probe not yet seen by HA BLE scanner | Turn probe on, wait ~30 seconds, check Settings → Devices & Services |
+| No discovery notification (MEATER Pro / 2 Plus, esp. via a Bluetooth proxy) | Probe advertises its name/service UUID only in the scan response, which the proxy may drop | Add it manually: **+ Add Integration → MEATER BLE** and pick the probe (out of the charger) from the list |
 | Ambient temp reads very high | Probe too close to heat source | Normal behavior; the MEATER ambient sensor reads radiant heat, not air temp |
 | Battery reads 0% | Probe fully discharged | Charge in the block for 2+ hours |
 

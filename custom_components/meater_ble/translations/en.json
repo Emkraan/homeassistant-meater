@@ -1,6 +1,13 @@
 {
   "config": {
     "step": {
+      "user": {
+        "title": "Add a MEATER probe",
+        "description": "Take the probe out of its charger and keep it within range of a Bluetooth adapter or proxy, then pick it below. If your probe isn't listed, wait a few seconds and try again — some probes only broadcast their name intermittently, so it may appear as a plain MAC address.",
+        "data": {
+          "address": "MEATER probe"
+        }
+      },
       "bluetooth_confirm": {
         "description": "Add **{name}** ({address}) — {manufacturer} {model}?\n\nThe probe will be read locally over Bluetooth. No cloud account required.",
         "title": "Confirm MEATER probe"
@@ -8,7 +15,8 @@
     },
     "abort": {
       "already_configured": "This probe is already configured.",
-      "no_devices_found": "No MEATER probe found. Make sure the probe is turned on and within Bluetooth range, then try again."
+      "dock": "That's the MEATER charger/dock, not the probe. The dock can't be read directly. Take the probe out of the charger and it will be discovered on its own.",
+      "no_devices_found": "No Bluetooth devices found. Make sure the probe is out of its charger, turned on and within range of a Bluetooth adapter or proxy, then try again."
     }
   },
   "entity": {

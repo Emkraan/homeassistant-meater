@@ -2,6 +2,19 @@
 
 All notable changes to this integration are documented here.
 
+## [2026.6.4] — 2026-07-02
+
+### Fixed
+
+- **MEATER Pro / MEATER 2 Plus still not discovered, and manual setup found nothing** ([#3](https://github.com/Emkraan/homeassistant-meater/issues/3), reported by @finity69x2). Two problems:
+  - **Auto-discovery matched only on data carried in the scan response.** The service UUID and local name a MEATER probe broadcasts ride in the BLE *scan response*, which arrives intermittently and which an ESP32/ESPHome Bluetooth proxy does not always forward — so the matchers added in 2026.6.2/2026.6.3 never fired reliably. (The `local_name: "MEATER*"` matcher also can't match the lowercase `meater2` name newer probes advertise, because Home Assistant's local-name matching is case-sensitive.) Auto-discovery now matches on the **Apption Labs manufacturer ID (`0x037B` / 891)**, which is broadcast in the *primary* advertising packet on every advertisement, plus case-insensitive local-name variants. Manufacturer ID `0x037B` confirmed against the Bluetooth SIG assigned-numbers database and community advertisement captures.
+  - **Manual setup was a dead end.** "Add Integration → MEATER BLE" unconditionally reported "no probes found" — there was no manual path at all. It now runs an active Bluetooth scan and lists every advertisement Home Assistant has seen, so you can always pick your probe by name or, failing that, by its MAC address.
+- **Charger/dock no longer offered as a device.** The MEATER Pro/2 Plus charger advertises separately but can't be read (connecting returns ATT `0x0e`). It is now recognized and skipped during discovery and hidden from the manual picker, with a clear message if encountered.
+
+### Note
+
+- The claim in 2026.6.3 that service UUID `c9e2746c-…` is "GATT-only, never advertised" was incorrect — it *is* advertised (the community M5Stack display discovers the probe purely by matching it under an active scan). The real issue was that it, like the local name, rides in the intermittently delivered scan response.
+
 ## [2026.6.3] — 2026-07-01
 
 ### Fixed

@@ -6,6 +6,9 @@
   "dependencies": ["bluetooth"],
   "bluetooth": [
     {
+      "manufacturer_id": 891
+    },
+    {
       "service_uuid": "a75cc7fc-c956-488f-ac2a-2dbc08b63a04"
     },
     {
@@ -13,6 +16,12 @@
     },
     {
       "local_name": "MEATER*"
+    },
+    {
+      "local_name": "Meater*"
+    },
+    {
+      "local_name": "meater*"
     }
   ],
   "documentation": "https://github.com/Emkraan/homeassistant-meater",
@@ -20,5 +29,5 @@
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/Emkraan/homeassistant-meater/issues",
   "requirements": [],
-  "version": "2026.6.3"
+  "version": "2026.6.4"
 }
