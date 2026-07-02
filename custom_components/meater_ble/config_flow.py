@@ -38,7 +38,7 @@ def _is_meater(discovery_info: BluetoothServiceInfoBleak) -> bool:
 
     Matches on any signal a MEATER device may broadcast: the Apption Labs manufacturer
     ID (always in the primary advertisement), a known MEATER service UUID, or a name
-    beginning with "meater" (case-insensitive — the probe advertises "MEATER", "MEATER+"
+    beginning with "meater" (case-insensitive - the probe advertises "MEATER", "MEATER+"
     or "meater2" depending on model/firmware).
     """
     if MEATER_MANUFACTURER_ID in discovery_info.manufacturer_data:
@@ -54,7 +54,7 @@ def _is_dock_only(discovery_info: BluetoothServiceInfoBleak) -> bool:
     """Return True if the advertisement is the charger/dock and NOT a probe.
 
     The dock advertises the ``dcbb67ca`` service UUID and has no readable temperature
-    characteristics — connecting to it fails with ATT 0x0e (see #2). We only treat an
+    characteristics - connecting to it fails with ATT 0x0e (see #2). We only treat an
     advertisement as the dock when it carries the dock UUID and none of the probe UUIDs,
     so a probe is never mistaken for the dock.
     """
@@ -76,10 +76,10 @@ class MeaterBLEConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for MEATER BLE.
 
     Two entry points:
-    * ``async_step_bluetooth`` — HA auto-discovers a probe whose advertisement matches a
+    * ``async_step_bluetooth`` - HA auto-discovers a probe whose advertisement matches a
       matcher in manifest.json (manufacturer ID, service UUID, or local name). The user
       just confirms.
-    * ``async_step_user`` — manual "add device". Forces an active Bluetooth scan and lists
+    * ``async_step_user`` - manual "add device". Forces an active Bluetooth scan and lists
       every advertisement HA has seen so the user can pick their probe by name/address,
       even when auto-discovery never fired (e.g. a proxy that drops the scan response).
     """
@@ -101,7 +101,7 @@ class MeaterBLEConfigFlow(ConfigFlow, domain=DOMAIN):
 
         # The Apption Labs manufacturer ID (and, on some firmware, the local name) also
         # match the charger/dock, which is not a valid connection target. Don't nag the
-        # user to add it — the probe advertises separately when out of the charger.
+        # user to add it - the probe advertises separately when out of the charger.
         if _is_dock_only(discovery_info):
             return self.async_abort(reason="dock")
 
@@ -136,7 +136,7 @@ class MeaterBLEConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Handle a manual setup attempt — let the user pick a discovered probe.
+        """Handle a manual setup attempt - let the user pick a discovered probe.
 
         Auto-discovery relies on the probe's name/service UUID reaching HA, which does not
         always happen through a Bluetooth proxy. This step forces an active scan and lists

@@ -2,7 +2,7 @@
   <img src="https://raw.githubusercontent.com/Emkraan/homeassistant-meater/main/.github/homeassistant-meater.png" alt="MEATER BLE" width="120" />
 </p>
 
-<h1 align="center">MEATER BLE — Home Assistant Integration</h1>
+<h1 align="center">MEATER BLE - Home Assistant Integration</h1>
 
 <p align="center">
   Local Bluetooth integration for MEATER and MEATER+ wireless meat thermometer probes.<br>
@@ -40,12 +40,12 @@
 
 ## Features
 
-- **Fully local** — communicates directly with the MEATER / MEATER+ probe over Bluetooth. No MEATER cloud account or internet connection required.
-- **Auto-discovery** — Home Assistant detects the probe automatically via its BLE service UUID and presents a one-click setup notification.
-- **Real-time updates** — passive BLE scan triggers a coordinator refresh whenever the probe broadcasts, rather than waiting for a fixed poll interval.
-- **No extra hardware** — works with any Bluetooth adapter visible to HA (built-in, USB dongle, or an [ESP32 Bluetooth proxy](https://esphome.io/components/bluetooth_proxy.html)).
-- **Self-healing** — if the probe goes out of range, the last known values are retained and HA retries automatically on the next broadcast.
-- **Structured cook status** — derives a cook state from live temperature without any cloud dependency.
+- **Fully local** - communicates directly with the MEATER / MEATER+ probe over Bluetooth. No MEATER cloud account or internet connection required.
+- **Auto-discovery** - Home Assistant detects the probe automatically via its BLE service UUID and presents a one-click setup notification.
+- **Real-time updates** - passive BLE scan triggers a coordinator refresh whenever the probe broadcasts, rather than waiting for a fixed poll interval.
+- **No extra hardware** - works with any Bluetooth adapter visible to HA (built-in, USB dongle, or an [ESP32 Bluetooth proxy](https://esphome.io/components/bluetooth_proxy.html)).
+- **Self-healing** - if the probe goes out of range, the last known values are retained and HA retries automatically on the next broadcast.
+- **Structured cook status** - derives a cook state from live temperature without any cloud dependency.
 
 ---
 
@@ -54,7 +54,7 @@
 | Requirement | Details |
 |---|---|
 | Home Assistant | **2023.12** or newer |
-| Bluetooth | Any adapter accessible to HA — built-in, USB, or ESP32 Bluetooth proxy |
+| Bluetooth | Any adapter accessible to HA - built-in, USB, or ESP32 Bluetooth proxy |
 | Hardware | Original **MEATER**, **MEATER+**, **MEATER Pro**, or **MEATER 2 Plus** probe. |
 
 ---
@@ -71,7 +71,7 @@ Or manually:
 
 1. Open **HACS → Integrations**.
 2. Click the menu (⋮) → **Custom repositories**.
-3. Add `https://github.com/Emkraan/homeassistant-meater` — category: **Integration**.
+3. Add `https://github.com/Emkraan/homeassistant-meater` - category: **Integration**.
 4. Search for **MEATER BLE** and click **Download**.
 5. Restart Home Assistant.
 
@@ -91,7 +91,7 @@ Turn on your MEATER probe and bring it within Bluetooth range of your HA host. W
 
 Click **Configure** → **Submit** to add it. No credentials needed.
 
-**Don't see the notification?** Some probes (notably the MEATER Pro / MEATER 2 Plus) only broadcast their name and service UUID intermittently, and a Bluetooth proxy may not forward that part of the advertisement — so auto-discovery can be hit-or-miss. Add the probe manually instead: **Settings → Devices & Services → + Add Integration → MEATER BLE**. Take the probe out of its charger first; then pick it from the list. If it isn't listed by name, it will still appear by its MAC address.
+**Don't see the notification?** Some probes (notably the MEATER Pro / MEATER 2 Plus) only broadcast their name and service UUID intermittently, and a Bluetooth proxy may not forward that part of the advertisement - so auto-discovery can be hit-or-miss. Add the probe manually instead: **Settings → Devices & Services → + Add Integration → MEATER BLE**. Take the probe out of its charger first; then pick it from the list. If it isn't listed by name, it will still appear by its MAC address.
 
 Each probe becomes its own device in HA, identified by its Bluetooth MAC address.
 
@@ -108,16 +108,16 @@ All entities are grouped under one device per probe.
 | Tip Temperature | Current internal meat temperature | °C | `temperature` |
 | Ambient Temperature | Surrounding grill/oven temperature | °C | `temperature` |
 | Battery | Probe battery level | % | `battery` |
-| Cook Status | Current cook state (see below) | — | `enum` |
+| Cook Status | Current cook state (see below) | - | `enum` |
 
 ### Cook Status States
 
 | State | Meaning |
 |---|---|
-| `idle` | Probe is not inserted — tip temp below 30 °C |
+| `idle` | Probe is not inserted - tip temp below 30 °C |
 | `cooking` | Probe is in food and temperature is rising |
 | `approaching_target` | Tip is within target range (requires cloud supplement) |
-| `resting` | Tip temperature has dropped from its peak — meat is resting |
+| `resting` | Tip temperature has dropped from its peak - meat is resting |
 
 ---
 
@@ -127,7 +127,7 @@ All entities are grouped under one device per probe.
 
 ```yaml
 automation:
-  - alias: "MEATER — Notify when resting complete"
+  - alias: "MEATER - Notify when resting complete"
     trigger:
       - platform: state
         entity_id: sensor.meater_cook_status
@@ -137,14 +137,14 @@ automation:
       - service: notify.mobile_app_your_phone
         data:
           title: "MEATER"
-          message: "Your meat has finished resting — time to slice!"
+          message: "Your meat has finished resting - time to slice!"
 ```
 
 ### Alert if probe gets too hot
 
 ```yaml
 automation:
-  - alias: "MEATER — High ambient temperature alert"
+  - alias: "MEATER - High ambient temperature alert"
     trigger:
       - platform: numeric_state
         entity_id: sensor.meater_ambient_temperature
@@ -152,15 +152,15 @@ automation:
     action:
       - service: notify.mobile_app_your_phone
         data:
-          title: "MEATER — High Grill Temp"
-          message: "Ambient temperature is above 300 °C — check your grill."
+          title: "MEATER - High Grill Temp"
+          message: "Ambient temperature is above 300 °C - check your grill."
 ```
 
 ### Low battery warning
 
 ```yaml
 automation:
-  - alias: "MEATER — Low battery"
+  - alias: "MEATER - Low battery"
     trigger:
       - platform: numeric_state
         entity_id: sensor.meater_battery
@@ -169,7 +169,7 @@ automation:
       - service: notify.mobile_app_your_phone
         data:
           title: "MEATER"
-          message: "Probe battery is below 20% — charge soon."
+          message: "Probe battery is below 20% - charge soon."
 ```
 
 ---
@@ -178,7 +178,7 @@ automation:
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Entities stuck "unavailable" | MEATER app or Block is connected | **Close the MEATER app and disconnect the Block** — the probe only allows one BLE connection at a time |
+| Entities stuck "unavailable" | MEATER app or Block is connected | **Close the MEATER app and disconnect the Block** - the probe only allows one BLE connection at a time |
 | Entities stuck "unavailable" | Probe out of range or off | Turn probe on, bring within 10 m of HA Bluetooth adapter; integration retries automatically |
 | No discovery notification on first setup | Probe not yet seen by HA BLE scanner | Turn probe on, wait ~30 seconds, check Settings → Devices & Services |
 | No discovery notification (MEATER Pro / 2 Plus, esp. via a Bluetooth proxy) | Probe advertises its name/service UUID only in the scan response, which the proxy may drop | Add it manually: **+ Add Integration → MEATER BLE** and pick the probe (out of the charger) from the list |

@@ -10,7 +10,7 @@ from .coordinator import MeaterBLECoordinator
 
 
 class MeaterBaseEntity(CoordinatorEntity[MeaterBLECoordinator]):
-    """Common base — sets device info and availability for every platform."""
+    """Common base - sets device info and availability for every platform."""
 
     _attr_has_entity_name = True
 

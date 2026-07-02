@@ -3,13 +3,13 @@
     "step": {
       "user": {
         "title": "Add a MEATER probe",
-        "description": "Take the probe out of its charger and keep it within range of a Bluetooth adapter or proxy, then pick it below. If your probe isn't listed, wait a few seconds and try again — some probes only broadcast their name intermittently, so it may appear as a plain MAC address.",
+        "description": "Take the probe out of its charger and keep it within range of a Bluetooth adapter or proxy, then pick it below. If your probe isn't listed, wait a few seconds and try again - some probes only broadcast their name intermittently, so it may appear as a plain MAC address.",
         "data": {
           "address": "MEATER probe"
         }
       },
       "bluetooth_confirm": {
-        "description": "Add **{name}** ({address}) — {manufacturer} {model}?\n\nThe probe will be read locally over Bluetooth. No cloud account required.",
+        "description": "Add **{name}** ({address}) - {manufacturer} {model}?\n\nThe probe will be read locally over Bluetooth. No cloud account required.",
         "title": "Confirm MEATER probe"
       }
     },

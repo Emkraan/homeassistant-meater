@@ -1,7 +1,7 @@
 """DataUpdateCoordinator for the MEATER BLE integration.
 
 The original MEATER and MEATER+ probes expose temperature and battery data
-exclusively via GATT — there is nothing in the advertisement payload. They
+exclusively via GATT - there is nothing in the advertisement payload. They
 support only one concurrent BLE connection, so the MEATER app or Block must be
 closed before HA can connect.
 
@@ -65,7 +65,7 @@ def _decode_ambient(data: bytes) -> float:
     """Decode ambient temperature (°C) from the 6-byte temperature characteristic.
 
     The ambient correction is computed on the raw ADC scale using the raw tip
-    value, then the whole result is converted to Celsius once via (x + 8) / 16 —
+    value, then the whole result is converted to Celsius once via (x + 8) / 16 -
     matching the ESPHome community decode. Feeding it the already-converted tip
     (and skipping the final conversion) is what produced 1000 °C+ readings.
     """
@@ -107,7 +107,7 @@ def _decode_ambient_pro(data: bytes) -> float:
 
 
 def _decode_battery_pro(data: bytes) -> int | None:
-    """Battery decode for MEATER Pro 5-byte format — not yet confirmed.
+    """Battery decode for MEATER Pro 5-byte format - not yet confirmed.
 
     The raw bytes are logged at DEBUG level to help gather data for decoding.
     Returns None until the formula is validated.
@@ -168,7 +168,7 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
                 pass
 
     # ------------------------------------------------------------------
-    # Internal — connection loop
+    # Internal - connection loop
     # ------------------------------------------------------------------
 
     async def _connection_loop(self) -> None:
@@ -179,7 +179,7 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
             )
             if ble_device is None:
                 _LOGGER.debug(
-                    "MEATER %s not visible yet — waiting %ss before retry",
+                    "MEATER %s not visible yet - waiting %ss before retry",
                     self.address,
                     _RECONNECT_DELAY,
                 )
@@ -210,7 +210,7 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
 
             except (BleakError, asyncio.TimeoutError) as err:
                 _LOGGER.warning(
-                    "MEATER %s connection error (%s) — retrying in %ss",
+                    "MEATER %s connection error (%s) - retrying in %ss",
                     self.address,
                     err,
                     _RECONNECT_DELAY,
@@ -236,7 +236,7 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
         """Handle a temperature characteristic notification."""
         batt_raw = None
         if self._client and self._client.is_connected:
-            # Battery rarely changes — use last known value if available.
+            # Battery rarely changes - use last known value if available.
             if self.data is not None and self.data.battery is not None:
                 self._process(bytes(data), None)
                 return
@@ -252,7 +252,7 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
         raw = bytes(data)
         if len(raw) == 5:
             _LOGGER.debug(
-                "MEATER Pro %s battery raw (5 bytes): %s — decode not yet confirmed",
+                "MEATER Pro %s battery raw (5 bytes): %s - decode not yet confirmed",
                 self.address,
                 raw.hex("-"),
             )
@@ -278,9 +278,9 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
             tip = _decode_tip(temp_raw)
             ambient = _decode_ambient(temp_raw)
         if not AMBIENT_TEMP_MIN_C <= ambient <= AMBIENT_TEMP_MAX_C:
-            # Corrupt BLE packet — keep the last good value rather than spiking.
+            # Corrupt BLE packet - keep the last good value rather than spiking.
             _LOGGER.warning(
-                "MEATER %s: implausible ambient %.1f°C decoded — discarding packet",
+                "MEATER %s: implausible ambient %.1f°C decoded - discarding packet",
                 self.address,
                 ambient,
             )
@@ -288,7 +288,7 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
         if batt_raw is not None:
             if len(batt_raw) == 5:
                 _LOGGER.debug(
-                    "MEATER Pro %s battery raw (5 bytes): %s — decode not yet confirmed",
+                    "MEATER Pro %s battery raw (5 bytes): %s - decode not yet confirmed",
                     self.address,
                     batt_raw.hex("-"),
                 )
@@ -311,11 +311,11 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
         )
 
     # ------------------------------------------------------------------
-    # DataUpdateCoordinator override — not used for polling, but required.
+    # DataUpdateCoordinator override - not used for polling, but required.
     # ------------------------------------------------------------------
 
     async def _async_update_data(self) -> MeaterData:
-        """Not used — data arrives via notify callbacks."""
+        """Not used - data arrives via notify callbacks."""
         if self.data is not None:
             return self.data
-        raise UpdateFailed("No data yet — waiting for GATT connection")
+        raise UpdateFailed("No data yet - waiting for GATT connection")

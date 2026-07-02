@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for the suggestion. Please describe the *outcome* you want, not just the implementation — that helps evaluate whether the BLE protocol or a cloud supplement can actually support it.
+        Thanks for the suggestion. Please describe the *outcome* you want, not just the implementation - that helps evaluate whether the BLE protocol or a cloud supplement can actually support it.
 
         This integration reads the MEATER+ probe **locally over Bluetooth**. Features that require cloud data (cook name, target temperature, ETA) are possible but depend on the [MEATER public REST API](https://github.com/apption-labs/meater-cloud-public-rest-api).
 
@@ -30,14 +30,14 @@ body:
     id: alternatives
     attributes:
       label: Alternatives you've considered
-      description: Other ways you've thought about solving this — template sensors, automations, companion apps, etc.
+      description: Other ways you've thought about solving this - template sensors, automations, companion apps, etc.
 
   - type: dropdown
     id: data_source
     attributes:
       label: Does this feature require cloud data, or can it be derived locally from BLE?
       options:
-        - Local BLE only — no cloud needed
+        - Local BLE only - no cloud needed
         - Requires MEATER cloud API
         - Not sure
     validations:
