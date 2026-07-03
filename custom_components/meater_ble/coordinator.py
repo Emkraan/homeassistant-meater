@@ -1,30 +1,46 @@
 """DataUpdateCoordinator for the MEATER BLE integration.
 
 The original MEATER and MEATER+ probes expose temperature and battery data
-exclusively via GATT - there is nothing in the advertisement payload. They
+exclusively via GATT - there is nothing useful in the advertisement payload. They
 support only one concurrent BLE connection, so the MEATER app or Block must be
 closed before HA can connect.
 
-This coordinator maintains a persistent BLE connection and uses GATT notify
-to receive characteristic updates in real time, mirroring the ESPHome ble_client
-approach documented at https://github.com/R00S/meater-in-local-haos.
+This coordinator maintains a persistent GATT connection and uses GATT notify to
+receive characteristic updates in real time. Connections go through
+bleak_retry_connector.establish_connection (the same helper HA's own BLE
+integrations use), which transparently handles ESP32/ESPHome proxies, stale
+BLEDevice handles, and transient connection errors with retry + backoff.
 
-Decode formulas derived from the same ESPHome community config.
+Reconnection is event-driven: a bluetooth advertisement callback fires whenever
+the probe is seen in range, and we (re)connect from there. That is what makes
+recovery robust - when the probe is put back in its charger and pulled out again,
+HA sees the fresh advertisement and we reconnect immediately, instead of polling a
+possibly-stale address on a fixed timer.
+
+Decode formulas derived from ESPHome/community reverse-engineering.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from dataclasses import dataclass
 import logging
 import struct
 
-from bleak import BleakClient
 from bleak.backends.characteristic import BleakGATTCharacteristic
 from bleak.exc import BleakError
+from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
 
-from homeassistant.components.bluetooth import async_ble_device_from_address
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.components import bluetooth
+from homeassistant.components.bluetooth import (
+    BluetoothCallbackMatcher,
+    BluetoothChange,
+    BluetoothScanningMode,
+    BluetoothServiceInfoBleak,
+)
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
@@ -39,10 +55,16 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-# How long to wait for a GATT connection before giving up on this attempt.
-_CONNECT_TIMEOUT = 20.0
-# How long to wait between reconnect attempts when the probe drops.
-_RECONNECT_DELAY = 10.0
+# Number of connection attempts establish_connection makes per reconnect, each with
+# its own backoff. It re-fetches a fresh BLEDevice between attempts.
+_MAX_CONNECT_ATTEMPTS = 4
+
+# Minimum gap between reconnection attempts after a drop or a failed attempt. Stops a
+# probe that accepts then instantly drops the connection (single-connection contention
+# with the MEATER app/Block) from thrashing the adapter. A probe that simply reappears
+# from its charger still reconnects promptly via the advertisement callback once no
+# cooldown is pending.
+_RECONNECT_COOLDOWN = 5.0
 
 
 @dataclass
@@ -126,7 +148,7 @@ def _derive_cook_state(tip: float, prev_state: str, prev_tip: float | None) -> s
 
 
 class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
-    """Maintains a persistent GATT connection to a MEATER / MEATER+ probe."""
+    """Maintains a persistent, self-healing GATT connection to a MEATER probe."""
 
     def __init__(self, hass: HomeAssistant, address: str) -> None:
         """Initialize."""
@@ -136,94 +158,198 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
             name=f"{DOMAIN}:{address}",
         )
         self.address = address
-        self._client: BleakClient | None = None
-        self._keep_running = True
-        self._connection_task: asyncio.Task | None = None
+        self._client: BleakClientWithServiceCache | None = None
+        self._connected = False
+        self._connecting = False
+        self._closing = False
+        self._expected_disconnect = False
+        self._connect_task: asyncio.Task | None = None
+        self._cancel_reconnect: CALLBACK_TYPE | None = None
+        self._cancel_bluetooth_callback: CALLBACK_TYPE | None = None
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
-    def start(self) -> None:
-        """Start the persistent connection loop as a background task."""
-        self._keep_running = True
-        self._connection_task = self.hass.async_create_background_task(
-            self._connection_loop(),
-            name=f"meater_ble:{self.address}",
+    @property
+    def connected(self) -> bool:
+        """Whether a live GATT connection to the probe is currently held."""
+        return self._connected
+
+    @callback
+    def async_start(self) -> None:
+        """Register for advertisements and attempt an initial connection.
+
+        Registering the callback is what makes reconnection robust: HA invokes it
+        every time the probe is seen in range, so a probe that was in its charger
+        reconnects the instant it is pulled out again.
+        """
+        self._closing = False
+        self._cancel_bluetooth_callback = bluetooth.async_register_callback(
+            self.hass,
+            self._async_on_advertisement,
+            BluetoothCallbackMatcher(address=self.address, connectable=True),
+            BluetoothScanningMode.ACTIVE,
+        )
+        # The probe may already be in range at setup; don't wait for the next advert.
+        self._schedule_connect()
+
+    async def async_stop(self) -> None:
+        """Stop reconnecting and drop the connection cleanly."""
+        self._closing = True
+        self._expected_disconnect = True
+        if self._cancel_bluetooth_callback is not None:
+            self._cancel_bluetooth_callback()
+            self._cancel_bluetooth_callback = None
+        if self._cancel_reconnect is not None:
+            self._cancel_reconnect()
+            self._cancel_reconnect = None
+        if self._connect_task is not None:
+            self._connect_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._connect_task
+            self._connect_task = None
+        await self._async_disconnect()
+
+    # ------------------------------------------------------------------
+    # Reconnection plumbing
+    # ------------------------------------------------------------------
+
+    @callback
+    def _async_on_advertisement(
+        self, service_info: BluetoothServiceInfoBleak, change: BluetoothChange
+    ) -> None:
+        """Handle a fresh advertisement for our probe - (re)connect if needed."""
+        if not self._connected and not self._closing:
+            self._schedule_connect()
+
+    @callback
+    def _schedule_connect(self, delay: float = 0.0) -> None:
+        """Kick off a connection attempt, optionally after a cooldown.
+
+        A pending cooldown (``_cancel_reconnect``) or an in-flight attempt
+        (``_connecting``) suppresses new requests, so overlapping advertisement and
+        disconnect callbacks can neither double-connect nor bypass the cooldown.
+        """
+        if self._closing or self._connected:
+            return
+        if self._cancel_reconnect is not None:
+            return
+        if delay > 0:
+            # Queue a cooldown attempt. Deliberately not gated on an in-flight task:
+            # this is called from _async_connect's own finally, where the current
+            # task has not yet returned.
+            self._cancel_reconnect = async_call_later(
+                self.hass, delay, self._async_reconnect_fire
+            )
+            return
+        if self._connecting:
+            return
+        if self._connect_task is not None and not self._connect_task.done():
+            return
+        self._connect_task = self.hass.async_create_background_task(
+            self._async_connect(), name=f"meater_ble_connect:{self.address}"
         )
 
-    async def stop(self) -> None:
-        """Stop the connection loop and disconnect cleanly."""
-        self._keep_running = False
-        if self._connection_task:
-            self._connection_task.cancel()
-            try:
-                await self._connection_task
-            except asyncio.CancelledError:
-                pass
-        if self._client and self._client.is_connected:
-            try:
-                await self._client.disconnect()
-            except BleakError:
-                pass
+    @callback
+    def _async_reconnect_fire(self, _now: object) -> None:
+        """Fire a cooldown-delayed reconnect."""
+        self._cancel_reconnect = None
+        self._schedule_connect()
 
-    # ------------------------------------------------------------------
-    # Internal - connection loop
-    # ------------------------------------------------------------------
-
-    async def _connection_loop(self) -> None:
-        """Maintain a persistent connection; reconnect on drop."""
-        while self._keep_running:
-            ble_device = async_ble_device_from_address(
+    async def _async_connect(self) -> None:
+        """Establish the connection and subscribe to notifications."""
+        if self._connected or self._closing:
+            return
+        self._connecting = True
+        retry = False
+        try:
+            ble_device = bluetooth.async_ble_device_from_address(
                 self.hass, self.address, connectable=True
             )
             if ble_device is None:
+                # Not in range/connectable yet; the advertisement callback retries.
                 _LOGGER.debug(
-                    "MEATER %s not visible yet - waiting %ss before retry",
+                    "MEATER %s not connectable yet; will connect when it advertises",
                     self.address,
-                    _RECONNECT_DELAY,
                 )
-                await asyncio.sleep(_RECONNECT_DELAY)
-                continue
-
-            _LOGGER.debug("Connecting to MEATER %s", self.address)
+                return
             try:
-                async with BleakClient(
+                client = await establish_connection(
+                    BleakClientWithServiceCache,
                     ble_device,
-                    timeout=_CONNECT_TIMEOUT,
-                    disconnected_callback=self._on_disconnect,
-                ) as client:
-                    self._client = client
-                    _LOGGER.info("Connected to MEATER %s", self.address)
-
-                    await client.start_notify(CHAR_TEMPERATURE, self._on_temp_notify)
-                    await client.start_notify(CHAR_BATTERY, self._on_batt_notify)
-
-                    # Do an immediate read so entities populate right away.
-                    temp_raw = await client.read_gatt_char(CHAR_TEMPERATURE)
-                    batt_raw = await client.read_gatt_char(CHAR_BATTERY)
-                    self._process(temp_raw, batt_raw)
-
-                    # Hold the connection open; notify callbacks handle updates.
-                    while client.is_connected and self._keep_running:
-                        await asyncio.sleep(1.0)
-
+                    self.address,
+                    disconnected_callback=self._async_on_disconnect,
+                    max_attempts=_MAX_CONNECT_ATTEMPTS,
+                    ble_device_callback=lambda: bluetooth.async_ble_device_from_address(
+                        self.hass, self.address, connectable=True
+                    ),
+                )
             except (BleakError, asyncio.TimeoutError) as err:
-                _LOGGER.warning(
-                    "MEATER %s connection error (%s) - retrying in %ss",
+                _LOGGER.debug(
+                    "MEATER %s connection attempt failed (%s)", self.address, err
+                )
+                retry = True
+                return
+            # Connected: from here a failure must release the probe's single
+            # connection slot, or every future reconnect will fail.
+            try:
+                await client.start_notify(CHAR_TEMPERATURE, self._on_temp_notify)
+                await client.start_notify(CHAR_BATTERY, self._on_batt_notify)
+                temp_raw = await client.read_gatt_char(CHAR_TEMPERATURE)
+                batt_raw = await client.read_gatt_char(CHAR_BATTERY)
+            except (BleakError, asyncio.TimeoutError) as err:
+                _LOGGER.debug(
+                    "MEATER %s failed to subscribe after connecting (%s); "
+                    "disconnecting to free the probe",
                     self.address,
                     err,
-                    _RECONNECT_DELAY,
                 )
-            finally:
-                self._client = None
+                self._expected_disconnect = True
+                with contextlib.suppress(BleakError):
+                    await client.disconnect()
+                retry = True
+                return
+            self._client = client
+            self._connected = True
+            self._expected_disconnect = False
+            _LOGGER.info("Connected to MEATER %s", self.address)
+            # First reading populates entities and clears the unavailable state.
+            self._process(temp_raw, batt_raw)
+        finally:
+            self._connecting = False
+            if retry and not self._closing and not self._connected:
+                self._schedule_connect(_RECONNECT_COOLDOWN)
 
-            if self._keep_running:
-                await asyncio.sleep(_RECONNECT_DELAY)
-
-    def _on_disconnect(self, client: BleakClient) -> None:
+    @callback
+    def _async_on_disconnect(self, client: BleakClientWithServiceCache) -> None:
         """Called by Bleak when the probe drops the connection."""
-        _LOGGER.debug("MEATER %s disconnected", self.address)
+        self._connected = False
+        self._client = None
+        _LOGGER.debug(
+            "MEATER %s disconnected (expected=%s)",
+            self.address,
+            self._expected_disconnect,
+        )
+        # Reflect the drop immediately so entities show unavailable, not stale data.
+        self.async_update_listeners()
+        # An unexpected drop: retry after a cooldown so a probe that accepts then
+        # instantly drops can't thrash. If it went into the charger, the cooldown
+        # attempt fails fast and the advertisement callback takes over when it
+        # reappears.
+        if not self._expected_disconnect and not self._closing:
+            self._schedule_connect(_RECONNECT_COOLDOWN)
+
+    async def _async_disconnect(self) -> None:
+        """Tear down the current client, if any."""
+        client = self._client
+        self._client = None
+        self._connected = False
+        if client is not None and client.is_connected:
+            try:
+                await client.disconnect()
+            except BleakError as err:
+                _LOGGER.debug("MEATER %s error on disconnect: %s", self.address, err)
 
     # ------------------------------------------------------------------
     # Notify callbacks
@@ -234,21 +360,14 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
         self, characteristic: BleakGATTCharacteristic, data: bytearray
     ) -> None:
         """Handle a temperature characteristic notification."""
-        batt_raw = None
-        if self._client and self._client.is_connected:
-            # Battery rarely changes - use last known value if available.
-            if self.data is not None and self.data.battery is not None:
-                self._process(bytes(data), None)
-                return
-        self._process(bytes(data), batt_raw)
+        # Battery arrives on its own characteristic; carry the last known value.
+        self._process(bytes(data), None)
 
     @callback
     def _on_batt_notify(
         self, characteristic: BleakGATTCharacteristic, data: bytearray
     ) -> None:
         """Handle a battery characteristic notification."""
-        if self.data is None:
-            return
         raw = bytes(data)
         if len(raw) == 5:
             _LOGGER.debug(
@@ -261,13 +380,15 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
             battery = _decode_battery(raw)
         if battery is None:
             return
-        updated = MeaterData(
-            tip_temp=self.data.tip_temp,
-            ambient_temp=self.data.ambient_temp,
-            battery=battery,
-            cook_state=self.data.cook_state,
+        prev = self.data
+        self.async_set_updated_data(
+            MeaterData(
+                tip_temp=prev.tip_temp if prev else None,
+                ambient_temp=prev.ambient_temp if prev else None,
+                battery=battery,
+                cook_state=prev.cook_state if prev else "idle",
+            )
         )
-        self.async_set_updated_data(updated)
 
     def _process(self, temp_raw: bytes, batt_raw: bytes | None) -> None:
         """Decode raw bytes and push an update to all listeners."""

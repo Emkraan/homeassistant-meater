@@ -31,9 +31,9 @@ class MeaterBaseEntity(CoordinatorEntity[MeaterBLECoordinator]):
 
     @property
     def available(self) -> bool:
-        """Mirror coordinator availability."""
-        return (
-            super().available
-            and self.coordinator.last_update_success
-            and self.coordinator.data is not None
-        )
+        """Available only while a live connection is held and data has arrived.
+
+        Tied to the live GATT connection so a probe that drops (e.g. put back in its
+        charger) goes unavailable instead of showing a stale last reading.
+        """
+        return self.coordinator.connected and self.coordinator.data is not None

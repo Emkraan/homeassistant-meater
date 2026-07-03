@@ -19,17 +19,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     address: str = entry.data[CONF_ADDRESS]
 
     coordinator = MeaterBLECoordinator(hass, address)
-    coordinator.start()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Register for advertisements and connect once entities exist to receive updates.
+    coordinator.async_start()
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     coordinator: MeaterBLECoordinator = hass.data[DOMAIN][entry.entry_id]
-    await coordinator.stop()
+    await coordinator.async_stop()
 
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:

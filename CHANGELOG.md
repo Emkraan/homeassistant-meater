@@ -2,6 +2,14 @@
 
 All notable changes to this integration are documented here.
 
+## [2026.6.5] - 2026-07-02
+
+### Fixed
+
+- **Probe stuck "unavailable" after it reconnects (e.g. put back in the charger and taken out again).** The old connection loop used a raw `BleakClient` and re-polled a possibly-stale address on a fixed 10 s timer, with no way to recover a wedged or dropped connection, so a probe that worked once often never came back, even after reloading the integration. Connections now go through `bleak_retry_connector.establish_connection` (the same helper Home Assistant's built-in BLE integrations use), which handles ESP32/ESPHome proxies, stale device handles, and transient errors with retry and backoff.
+- **Reconnection is now event-driven.** The integration registers a Bluetooth advertisement callback and reconnects the instant the probe is seen in range again, instead of waiting on a timer. Taking the probe out of its charger now brings it back on its own.
+- **Entities now go "unavailable" the moment the connection drops** instead of showing a stale last reading, and clear again on reconnect.
+
 ## [2026.6.4] - 2026-07-02
 
 ### Fixed
