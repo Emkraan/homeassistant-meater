@@ -2,6 +2,19 @@
 
 All notable changes to this integration are documented here.
 
+## [2026.6.6] - 2026-07-06
+
+### Fixed
+
+- **Probe connects, streams for a minute or two, then goes "unavailable" for good** ([#3](https://github.com/Emkraan/homeassistant-meater/issues/3), reported by @finity69x2). Diagnostics showed the probe is heard continuously only by a passive (non-connectable) Bluetooth scanner, while the one connectable proxy hears it weakly and intermittently. Reconnection was tied to that weak connectable path in two ways, so once the first connection dropped it never came back until Home Assistant restarted:
+  - **The reconnect trigger ignored the advertisements it was actually getting.** The advertisement callback was registered for connectable advertisements only, so the frequent advertisements from the passive scanner were silently discarded and the reconnect logic was almost never woken. It now listens for advertisements from *any* scanner: a probe seen by any adapter is powered on and nearby, which is the cue to try reconnecting.
+  - **A failed reconnect gave up instead of retrying.** If no connectable adapter had a fresh view of the probe at that instant, the attempt returned and scheduled nothing further, waiting on a connectable advertisement that might never arrive. Reconnection is now a self-rescheduling loop with backoff (5 s up to 30 s, reset whenever the probe is seen), so it keeps trying on its own until a connectable path is available again.
+- **Entities no longer flap to "unavailable" on a brief blip.** A weak proxy link drops and re-establishes routinely. Entities now keep their last reading for a short grace window (90 s) while a reconnect is in flight, and only show unavailable if recovery does not happen within it.
+
+### Note
+
+- No application-level keepalive is needed to hold the connection: the MEATER 2 Plus / Pro push temperature automatically after subscribing, confirmed against four independent community implementations. The short-lived connection in this report was a Bluetooth link timeout on a weak proxy link, not a missing keepalive. For a reliable connection, place a connectable ESP32/ESPHome Bluetooth proxy nearer the probe (a passive scanner such as a Shelly can relay advertisements but cannot hold the GATT connection a MEATER requires).
+
 ## [2026.6.5] - 2026-07-02
 
 ### Fixed

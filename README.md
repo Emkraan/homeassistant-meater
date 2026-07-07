@@ -180,6 +180,7 @@ automation:
 |---|---|---|
 | Entities stuck "unavailable" | MEATER app or Block is connected | **Close the MEATER app and disconnect the Block** - the probe only allows one BLE connection at a time |
 | Entities stuck "unavailable" | Probe out of range or off | Turn probe on, bring within 10 m of HA Bluetooth adapter; integration retries automatically |
+| Connects, then drops after a minute or two (esp. via a Bluetooth proxy) | The connectable adapter/proxy hears the probe too weakly to hold the connection | Move a **connectable** ESP32/ESPHome Bluetooth proxy closer to the probe. A passive scanner (e.g. Shelly) can relay advertisements but cannot hold the connection a MEATER needs |
 | No discovery notification on first setup | Probe not yet seen by HA BLE scanner | Turn probe on, wait ~30 seconds, check Settings → Devices & Services |
 | No discovery notification (MEATER Pro / 2 Plus, esp. via a Bluetooth proxy) | Probe advertises its name/service UUID only in the scan response, which the proxy may drop | Add it manually: **+ Add Integration → MEATER BLE** and pick the probe (out of the charger) from the list |
 | Ambient temp reads very high | Probe too close to heat source | Normal behavior; the MEATER ambient sensor reads radiant heat, not air temp |
@@ -197,7 +198,9 @@ logger:
 
 ## How It Works
 
-The probe continuously broadcasts BLE advertisements. This integration registers a **passive BLE listener** with HA's native Bluetooth stack, matching on the original MEATER/MEATER+ service UUID (`a75cc7fc-c956-488f-ac2a-2dbc08b63a04`) and, since Pro/2 Plus firmware doesn't reliably advertise a service UUID, on advertised local name (`MEATER*`). When the probe is detected, it connects briefly via GATT to read two characteristics:
+The probe continuously broadcasts BLE advertisements. Auto-discovery matches on the **Apption Labs manufacturer ID** (`0x037B` / 891), which every MEATER puts in the primary advertising packet, so it works even through a Bluetooth proxy (the local name and service UUID ride in the scan response, which proxies do not reliably forward).
+
+Temperature and battery are not in the advertisement, so the integration holds a **persistent GATT connection** to the probe and receives updates in real time via GATT notify. Reconnection is self-healing: it listens for advertisements from any scanner (so a probe seen by a passive proxy still triggers a reconnect) and keeps retrying on a backoff timer until a connectable path is available, and it keeps the last reading for a short grace window across brief drops. The connection reads two characteristics:
 
 | Characteristic UUID | Content |
 |---|---|

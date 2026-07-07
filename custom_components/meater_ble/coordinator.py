@@ -11,11 +11,15 @@ bleak_retry_connector.establish_connection (the same helper HA's own BLE
 integrations use), which transparently handles ESP32/ESPHome proxies, stale
 BLEDevice handles, and transient connection errors with retry + backoff.
 
-Reconnection is event-driven: a bluetooth advertisement callback fires whenever
-the probe is seen in range, and we (re)connect from there. That is what makes
-recovery robust - when the probe is put back in its charger and pulled out again,
-HA sees the fresh advertisement and we reconnect immediately, instead of polling a
-possibly-stale address on a fixed timer.
+Reconnection is both event-driven and self-scheduling. A bluetooth advertisement
+callback fires whenever the probe is seen in range by ANY scanner - connectable or
+not - and a self-rescheduling backoff loop keeps retrying while disconnected even
+when no connectable adapter has a fresh view of the probe yet. This matters through
+Bluetooth proxies: a probe is often heard continuously by a passive (non-connectable)
+scanner while the only connectable proxy hears it weakly and intermittently (see #3),
+so recovery must not depend on a connectable advertisement alone. A short availability
+grace window keeps the last reading visible across brief drops instead of flapping
+every entity to unavailable while a reconnect is in flight.
 
 Decode formulas derived from ESPHome/community reverse-engineering.
 """
@@ -59,12 +63,24 @@ _LOGGER = logging.getLogger(__name__)
 # its own backoff. It re-fetches a fresh BLEDevice between attempts.
 _MAX_CONNECT_ATTEMPTS = 4
 
-# Minimum gap between reconnection attempts after a drop or a failed attempt. Stops a
+# Base gap between reconnection attempts after a drop or a failed attempt. Stops a
 # probe that accepts then instantly drops the connection (single-connection contention
 # with the MEATER app/Block) from thrashing the adapter. A probe that simply reappears
-# from its charger still reconnects promptly via the advertisement callback once no
-# cooldown is pending.
+# from its charger still reconnects promptly: any advertisement resets the backoff to
+# this floor.
 _RECONNECT_COOLDOWN = 5.0
+
+# Ceiling for the reconnection backoff. Each consecutive failed attempt doubles the
+# gap up to this cap, so a probe that is genuinely gone (asleep, out of range, or in
+# its charger) is retried gently instead of hammered, while one that is present is
+# retried every few seconds because its advertisements keep resetting the backoff.
+_RECONNECT_COOLDOWN_MAX = 30.0
+
+# How long entities keep serving their last reading after an unexpected drop while a
+# reconnect is attempted. A weak proxy link blips routinely; without this window every
+# blip would flap the entities to unavailable. If recovery does not happen within it,
+# the entities go unavailable (the probe really is gone).
+_AVAILABILITY_GRACE = 90.0
 
 
 @dataclass
@@ -166,6 +182,9 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
         self._connect_task: asyncio.Task | None = None
         self._cancel_reconnect: CALLBACK_TYPE | None = None
         self._cancel_bluetooth_callback: CALLBACK_TYPE | None = None
+        self._reconnect_backoff = _RECONNECT_COOLDOWN
+        self._grace_active = False
+        self._cancel_grace: CALLBACK_TYPE | None = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -176,19 +195,34 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
         """Whether a live GATT connection to the probe is currently held."""
         return self._connected
 
+    @property
+    def available(self) -> bool:
+        """Whether entities should present data.
+
+        True while connected, and briefly after an unexpected drop (the grace
+        window) so a transient blip on a proxy link does not flap every entity to
+        unavailable while a reconnect is in flight.
+        """
+        return self._connected or self._grace_active
+
     @callback
     def async_start(self) -> None:
         """Register for advertisements and attempt an initial connection.
 
-        Registering the callback is what makes reconnection robust: HA invokes it
-        every time the probe is seen in range, so a probe that was in its charger
-        reconnects the instant it is pulled out again.
+        The callback is registered with ``connectable=False`` so HA invokes it for
+        advertisements heard by ANY scanner, including passive (non-connectable) ones.
+        Through a Bluetooth proxy the probe is frequently heard only by a passive
+        scanner while the connectable proxy hears it weakly (see #3); a
+        ``connectable=True`` matcher would silently drop those advertisements and the
+        reconnect trigger would rarely fire. Seeing the probe on any scanner means it
+        is powered on and nearby, so we then attempt a connectable connection from
+        there (and the backoff loop keeps trying if no connectable path exists yet).
         """
         self._closing = False
         self._cancel_bluetooth_callback = bluetooth.async_register_callback(
             self.hass,
             self._async_on_advertisement,
-            BluetoothCallbackMatcher(address=self.address, connectable=True),
+            BluetoothCallbackMatcher(address=self.address, connectable=False),
             BluetoothScanningMode.ACTIVE,
         )
         # The probe may already be in range at setup; don't wait for the next advert.
@@ -204,6 +238,7 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
         if self._cancel_reconnect is not None:
             self._cancel_reconnect()
             self._cancel_reconnect = None
+        self._clear_grace()
         if self._connect_task is not None:
             self._connect_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -219,9 +254,37 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
     def _async_on_advertisement(
         self, service_info: BluetoothServiceInfoBleak, change: BluetoothChange
     ) -> None:
-        """Handle a fresh advertisement for our probe - (re)connect if needed."""
-        if not self._connected and not self._closing:
-            self._schedule_connect()
+        """Handle a fresh advertisement for our probe - (re)connect if needed.
+
+        Fires for advertisements from any scanner (see ``async_start``). A fresh
+        advertisement means the probe is powered on and nearby, so reset the backoff
+        to the floor and try to connect promptly.
+        """
+        if self._connected or self._closing:
+            return
+        self._reset_reconnect_backoff()
+        self._schedule_connect()
+
+    @callback
+    def _reset_reconnect_backoff(self) -> None:
+        """Return the reconnect backoff to its floor (probe seen / just connected)."""
+        self._reconnect_backoff = _RECONNECT_COOLDOWN
+
+    @callback
+    def _schedule_reconnect(self) -> None:
+        """Queue the next reconnect attempt, escalating the backoff each time.
+
+        This is what makes recovery self-healing without a connectable advertisement:
+        a failed attempt always schedules the next one (up to ``_RECONNECT_COOLDOWN_MAX``)
+        instead of waiting for an advert that may never arrive on the connectable path.
+        """
+        if self._closing or self._connected:
+            return
+        delay = self._reconnect_backoff
+        self._reconnect_backoff = min(
+            self._reconnect_backoff * 2, _RECONNECT_COOLDOWN_MAX
+        )
+        self._schedule_connect(delay)
 
     @callback
     def _schedule_connect(self, delay: float = 0.0) -> None:
@@ -268,11 +331,14 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
                 self.hass, self.address, connectable=True
             )
             if ble_device is None:
-                # Not in range/connectable yet; the advertisement callback retries.
+                # No connectable adapter has a path to the probe yet - through a proxy
+                # it may currently be heard only by a passive scanner. Keep retrying on
+                # the backoff timer rather than waiting for a connectable advertisement
+                # that may never arrive (see #3).
                 _LOGGER.debug(
-                    "MEATER %s not connectable yet; will connect when it advertises",
-                    self.address,
+                    "MEATER %s has no connectable path yet; will retry", self.address
                 )
+                retry = True
                 return
             try:
                 client = await establish_connection(
@@ -313,13 +379,17 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
             self._client = client
             self._connected = True
             self._expected_disconnect = False
+            # Back to a healthy link: drop the backoff to its floor and end any grace
+            # window from a previous drop.
+            self._reset_reconnect_backoff()
+            self._clear_grace()
             _LOGGER.info("Connected to MEATER %s", self.address)
             # First reading populates entities and clears the unavailable state.
             self._process(temp_raw, batt_raw)
         finally:
             self._connecting = False
             if retry and not self._closing and not self._connected:
-                self._schedule_connect(_RECONNECT_COOLDOWN)
+                self._schedule_reconnect()
 
     @callback
     def _async_on_disconnect(self, client: BleakClientWithServiceCache) -> None:
@@ -331,14 +401,15 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
             self.address,
             self._expected_disconnect,
         )
-        # Reflect the drop immediately so entities show unavailable, not stale data.
-        self.async_update_listeners()
-        # An unexpected drop: retry after a cooldown so a probe that accepts then
-        # instantly drops can't thrash. If it went into the charger, the cooldown
-        # attempt fails fast and the advertisement callback takes over when it
-        # reappears.
+        # An unexpected drop: hold the last reading for a short grace window and keep
+        # retrying with backoff. Recovery must not depend on a connectable advertisement
+        # - through a proxy the probe is often heard only by a passive scanner (see #3).
         if not self._expected_disconnect and not self._closing:
-            self._schedule_connect(_RECONNECT_COOLDOWN)
+            self._start_grace_period()
+            self._schedule_reconnect()
+        # Reflect the state change. During the grace window ``available`` stays True, so
+        # entities keep the last reading instead of flapping to unavailable.
+        self.async_update_listeners()
 
     async def _async_disconnect(self) -> None:
         """Tear down the current client, if any."""
@@ -350,6 +421,38 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
                 await client.disconnect()
             except BleakError as err:
                 _LOGGER.debug("MEATER %s error on disconnect: %s", self.address, err)
+
+    # ------------------------------------------------------------------
+    # Availability grace window
+    # ------------------------------------------------------------------
+
+    @callback
+    def _start_grace_period(self) -> None:
+        """Keep entities on their last reading briefly while we try to reconnect."""
+        if self.data is None:
+            # Never had a reading - nothing to preserve, stay unavailable.
+            return
+        if self._cancel_grace is not None:
+            self._cancel_grace()
+        self._grace_active = True
+        self._cancel_grace = async_call_later(
+            self.hass, _AVAILABILITY_GRACE, self._async_grace_expired
+        )
+
+    @callback
+    def _async_grace_expired(self, _now: object) -> None:
+        """Grace window elapsed without recovery - let entities go unavailable."""
+        self._cancel_grace = None
+        self._grace_active = False
+        self.async_update_listeners()
+
+    @callback
+    def _clear_grace(self) -> None:
+        """Cancel any active grace window (we are connected again, or shutting down)."""
+        if self._cancel_grace is not None:
+            self._cancel_grace()
+            self._cancel_grace = None
+        self._grace_active = False
 
     # ------------------------------------------------------------------
     # Notify callbacks

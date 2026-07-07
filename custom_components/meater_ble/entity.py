@@ -31,9 +31,11 @@ class MeaterBaseEntity(CoordinatorEntity[MeaterBLECoordinator]):
 
     @property
     def available(self) -> bool:
-        """Available only while a live connection is held and data has arrived.
+        """Available while connected, or briefly after a drop (reconnect grace).
 
-        Tied to the live GATT connection so a probe that drops (e.g. put back in its
-        charger) goes unavailable instead of showing a stale last reading.
+        Tied to the coordinator connection state plus a short grace window, so a probe
+        that truly goes away (put back in its charger, out of range) eventually shows
+        unavailable, while a transient proxy-link blip does not flap the entity while a
+        reconnect is in flight.
         """
-        return self.coordinator.connected and self.coordinator.data is not None
+        return self.coordinator.available and self.coordinator.data is not None
