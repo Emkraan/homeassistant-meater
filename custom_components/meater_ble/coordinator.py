@@ -104,13 +104,18 @@ _RECONNECT_COOLDOWN_MAX = 30.0
 _AVAILABILITY_GRACE = 90.0
 
 # How often to actively read the temperature characteristic. This is the reliable data
-# path for read-populated probes and the heartbeat that detects a dead link. Kept gentle
-# so it does not stress a weak proxy link.
-_READ_POLL_INTERVAL = 5.0
+# path for read-populated probes and the heartbeat that detects a dead link. Kept
+# deliberately gentle: every read is an over-the-air request/response round trip through
+# the proxy, and on a weak link (a probe buried in a metal grill/smoker) frequent GATT
+# reads add congestion that can itself provoke a supervision-timeout drop. BLE best
+# practice is to prefer notifications and poll sparingly in a noisy 2.4 GHz environment,
+# so this is a slow heartbeat, not a fast poll: the MEATER 2 Plus / Pro stream via notify
+# anyway, and a 20 s cadence is plenty for a cook.
+_READ_POLL_INTERVAL = 20.0
 
 # Read the battery characteristic once every N poll ticks (~60 s). Battery changes slowly,
 # so there is no reason to read it as often as temperature.
-_BATTERY_POLL_EVERY = 12
+_BATTERY_POLL_EVERY = 3
 
 # Per-read ceiling. A healthy read through a proxy completes in well under a second; a
 # half-open link makes the read hang, so it must be bounded or the poll loop wedges.
@@ -118,11 +123,11 @@ _READ_TIMEOUT = 10.0
 
 # If neither a notification nor a successful read produces data within this window while
 # nominally connected, the link is half-open (the GATT layer is dead but no disconnect
-# callback fired). Tear it down and reconnect. Comfortably above the healthy update
-# cadence (notify is sub-second; the read poll is every 5 s) so normal jitter never trips
-# it, and below the grace window so a forced reconnect still has time to recover before
-# entities flap to unavailable.
-_STALL_TIMEOUT = 30.0
+# callback fired). Tear it down and reconnect. Sized above the read cadence plus a
+# hung-read timeout (20 s + 10 s) with margin so normal jitter never trips it, and below
+# the grace window so a forced reconnect still has time to recover before entities flap
+# to unavailable.
+_STALL_TIMEOUT = 45.0
 
 # Ceiling on how long to wait for a deliberate disconnect to complete. A half-open link
 # can make client.disconnect() hang, so recovery must not block on it.

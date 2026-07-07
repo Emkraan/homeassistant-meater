@@ -2,6 +2,12 @@
 
 All notable changes to this integration are documented here.
 
+## [2026.6.8] - 2026-07-07
+
+### Changed
+
+- **Gentler active read poll on weak links** ([#3](https://github.com/Emkraan/homeassistant-meater/issues/3)). The liveness read added in 2026.6.7 ran every 5 seconds. Each read is an over-the-air round trip through the Bluetooth proxy, and on a weak link (a probe buried in a metal grill/smoker) frequent GATT reads can add enough congestion to provoke a connection drop of their own, against BLE best practice of preferring notifications and polling sparingly in a noisy 2.4 GHz environment. The read is now a slow 20 second heartbeat (battery every ~60 s), which still serves read-populated probes and still catches a half-open link, while adding far less load. The stall watchdog window is widened to 45 seconds to match.
+
 ## [2026.6.7] - 2026-07-07
 
 ### Fixed
