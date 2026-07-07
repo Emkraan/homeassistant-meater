@@ -5,11 +5,25 @@ exclusively via GATT - there is nothing useful in the advertisement payload. The
 support only one concurrent BLE connection, so the MEATER app or Block must be
 closed before HA can connect.
 
-This coordinator maintains a persistent GATT connection and uses GATT notify to
-receive characteristic updates in real time. Connections go through
+This coordinator maintains a persistent GATT connection. Connections go through
 bleak_retry_connector.establish_connection (the same helper HA's own BLE
 integrations use), which transparently handles ESP32/ESPHome proxies, stale
 BLEDevice handles, and transient connection errors with retry + backoff.
+
+Data flows two ways, so the integration works across the whole MEATER family and
+survives a half-open link:
+
+* GATT notify. The MEATER 2 Plus / Pro push temperature automatically after
+  subscribing, so notifications give low-latency updates when they arrive.
+* An active read poll. The coordinator also reads the temperature (and, less often,
+  battery) characteristic on a timer. This is the reliable data path for probes that
+  are read-populated rather than notify-driven (the original MEATER/MEATER+ appear to
+  be), and it doubles as a liveness probe: a read that fails or hangs is a definitive
+  sign of a dead link. If neither notify nor a successful read produces data within a
+  stall window, the link is treated as half-open (a common ESP32/ESPHome-proxy failure
+  where the GATT layer dies but the proxy keeps the connection slot) and the connection
+  is torn down and re-established. A passive notify-silence timer alone cannot catch
+  this, because a half-open drop often fires no Bleak disconnect callback at all.
 
 Reconnection is both event-driven and self-scheduling. A bluetooth advertisement
 callback fires whenever the probe is seen in range by ANY scanner - connectable or
@@ -21,6 +35,13 @@ so recovery must not depend on a connectable advertisement alone. A short availa
 grace window keeps the last reading visible across brief drops instead of flapping
 every entity to unavailable while a reconnect is in flight.
 
+Note: when a probe stops advertising entirely because a Bluetooth proxy is holding a
+leaked/half-open connection slot to it, no HA-side API can force a remote proxy to
+release that slot (bleak_retry_connector's stale-connection helpers are BlueZ-local
+and proxy-blind). The coordinator surfaces this with an actionable warning after
+sustained failure to find any connectable path; the fix there is proxy-side (update
+ESPHome firmware, move a connectable proxy closer, or reboot the proxy).
+
 Decode formulas derived from ESPHome/community reverse-engineering.
 """
 
@@ -29,6 +50,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from dataclasses import dataclass
+from datetime import timedelta
 import logging
 import struct
 
@@ -44,7 +66,7 @@ from homeassistant.components.bluetooth import (
     BluetoothServiceInfoBleak,
 )
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
-from homeassistant.helpers.event import async_call_later
+from homeassistant.helpers.event import async_call_later, async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
@@ -65,22 +87,58 @@ _MAX_CONNECT_ATTEMPTS = 4
 
 # Base gap between reconnection attempts after a drop or a failed attempt. Stops a
 # probe that accepts then instantly drops the connection (single-connection contention
-# with the MEATER app/Block) from thrashing the adapter. A probe that simply reappears
-# from its charger still reconnects promptly: any advertisement resets the backoff to
-# this floor.
+# with the MEATER app/Block) from thrashing the adapter.
 _RECONNECT_COOLDOWN = 5.0
 
 # Ceiling for the reconnection backoff. Each consecutive failed attempt doubles the
 # gap up to this cap, so a probe that is genuinely gone (asleep, out of range, or in
-# its charger) is retried gently instead of hammered, while one that is present is
-# retried every few seconds because its advertisements keep resetting the backoff.
+# its charger) is retried gently instead of hammered.
 _RECONNECT_COOLDOWN_MAX = 30.0
 
 # How long entities keep serving their last reading after an unexpected drop while a
 # reconnect is attempted. A weak proxy link blips routinely; without this window every
 # blip would flap the entities to unavailable. If recovery does not happen within it,
-# the entities go unavailable (the probe really is gone).
+# the entities go unavailable (the probe really is gone). The window is measured from
+# the FIRST drop and is not re-armed by subsequent blips, so a probe that keeps
+# flapping without ever reconnecting cannot serve a stale reading indefinitely.
 _AVAILABILITY_GRACE = 90.0
+
+# How often to actively read the temperature characteristic. This is the reliable data
+# path for read-populated probes and the heartbeat that detects a dead link. Kept gentle
+# so it does not stress a weak proxy link.
+_READ_POLL_INTERVAL = 5.0
+
+# Read the battery characteristic once every N poll ticks (~60 s). Battery changes slowly,
+# so there is no reason to read it as often as temperature.
+_BATTERY_POLL_EVERY = 12
+
+# Per-read ceiling. A healthy read through a proxy completes in well under a second; a
+# half-open link makes the read hang, so it must be bounded or the poll loop wedges.
+_READ_TIMEOUT = 10.0
+
+# If neither a notification nor a successful read produces data within this window while
+# nominally connected, the link is half-open (the GATT layer is dead but no disconnect
+# callback fired). Tear it down and reconnect. Comfortably above the healthy update
+# cadence (notify is sub-second; the read poll is every 5 s) so normal jitter never trips
+# it, and below the grace window so a forced reconnect still has time to recover before
+# entities flap to unavailable.
+_STALL_TIMEOUT = 30.0
+
+# Ceiling on how long to wait for a deliberate disconnect to complete. A half-open link
+# can make client.disconnect() hang, so recovery must not block on it.
+_DISCONNECT_TIMEOUT = 10.0
+
+# A gap this long since the previous advertisement means the probe genuinely reappeared
+# (e.g. taken out of its charger) rather than the rapid advertisement stream of a probe
+# we keep failing to hold. Only then is the reconnect backoff reset, so app/Block
+# contention still escalates the backoff instead of pinning it at the floor.
+_ADVERT_SILENCE_RESET = 60.0
+
+# Number of consecutive reconnect attempts with no connectable path before warning the
+# user. With the backoff capped at 30 s this is a few minutes of a probe that is heard
+# (or not) but never has a connectable route - the signature of a wedged proxy slot or a
+# signal too weak to hold a link.
+_NO_PATH_WARN_AFTER = 8
 
 
 @dataclass
@@ -185,6 +243,14 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
         self._reconnect_backoff = _RECONNECT_COOLDOWN
         self._grace_active = False
         self._cancel_grace: CALLBACK_TYPE | None = None
+        # Liveness / active-poll state.
+        self._cancel_poll: CALLBACK_TYPE | None = None
+        self._polling = False
+        self._poll_tick = 0
+        self._last_data_time = 0.0
+        # Reconnect diagnostics.
+        self._last_advert_time = 0.0
+        self._no_path_count = 0
 
     # ------------------------------------------------------------------
     # Public API
@@ -238,6 +304,7 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
         if self._cancel_reconnect is not None:
             self._cancel_reconnect()
             self._cancel_reconnect = None
+        self._stop_poll()
         self._clear_grace()
         if self._connect_task is not None:
             self._connect_task.cancel()
@@ -257,17 +324,23 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
         """Handle a fresh advertisement for our probe - (re)connect if needed.
 
         Fires for advertisements from any scanner (see ``async_start``). A fresh
-        advertisement means the probe is powered on and nearby, so reset the backoff
-        to the floor and try to connect promptly.
+        advertisement means the probe is powered on and nearby, so try to connect
+        promptly. The backoff is only reset when the probe reappears after a period of
+        silence (see ``_ADVERT_SILENCE_RESET``); a probe that advertises continuously
+        while we keep failing to hold it (app/Block contention) must not pin the backoff
+        at its floor.
         """
         if self._connected or self._closing:
             return
-        self._reset_reconnect_backoff()
+        now = self.hass.loop.time()
+        if now - self._last_advert_time > _ADVERT_SILENCE_RESET:
+            self._reset_reconnect_backoff()
+        self._last_advert_time = now
         self._schedule_connect()
 
     @callback
     def _reset_reconnect_backoff(self) -> None:
-        """Return the reconnect backoff to its floor (probe seen / just connected)."""
+        """Return the reconnect backoff to its floor (probe reappeared / just connected)."""
         self._reconnect_backoff = _RECONNECT_COOLDOWN
 
     @callback
@@ -335,9 +408,23 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
                 # it may currently be heard only by a passive scanner. Keep retrying on
                 # the backoff timer rather than waiting for a connectable advertisement
                 # that may never arrive (see #3).
-                _LOGGER.debug(
-                    "MEATER %s has no connectable path yet; will retry", self.address
-                )
+                self._no_path_count += 1
+                if self._no_path_count == _NO_PATH_WARN_AFTER:
+                    _LOGGER.warning(
+                        "MEATER %s: no connectable Bluetooth path after repeated "
+                        "attempts. The probe is not reachable for a GATT connection. "
+                        "If a Bluetooth proxy is in range, its connection slot may be "
+                        "wedged (a known ESPHome issue, fixed in ESPHome 2026.5.1) or "
+                        "the probe's signal is too weak to hold a link. Try updating "
+                        "ESPHome on the proxy, moving a connectable proxy closer to the "
+                        "probe, or rebooting the proxy.",
+                        self.address,
+                    )
+                else:
+                    _LOGGER.debug(
+                        "MEATER %s has no connectable path yet; will retry",
+                        self.address,
+                    )
                 retry = True
                 return
             try:
@@ -379,13 +466,16 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
             self._client = client
             self._connected = True
             self._expected_disconnect = False
-            # Back to a healthy link: drop the backoff to its floor and end any grace
-            # window from a previous drop.
+            # Back to a healthy link: drop the backoff to its floor, clear the
+            # no-path counter, and end any grace window from a previous drop.
             self._reset_reconnect_backoff()
+            self._no_path_count = 0
             self._clear_grace()
             _LOGGER.info("Connected to MEATER %s", self.address)
-            # First reading populates entities and clears the unavailable state.
+            # First reading populates entities and clears the unavailable state, and
+            # seeds the liveness clock before the poll loop starts.
             self._process(temp_raw, batt_raw)
+            self._start_poll()
         finally:
             self._connecting = False
             if retry and not self._closing and not self._connected:
@@ -394,8 +484,14 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
     @callback
     def _async_on_disconnect(self, client: BleakClientWithServiceCache) -> None:
         """Called by Bleak when the probe drops the connection."""
+        if client is not self._client:
+            # A late callback from a torn-down attempt (e.g. a deliberate disconnect on
+            # the subscribe-failure path, or a previous client that dropped after a newer
+            # one connected). It must not clobber the current connection's state.
+            return
         self._connected = False
         self._client = None
+        self._stop_poll()
         _LOGGER.debug(
             "MEATER %s disconnected (expected=%s)",
             self.address,
@@ -412,15 +508,109 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
         self.async_update_listeners()
 
     async def _async_disconnect(self) -> None:
-        """Tear down the current client, if any."""
+        """Tear down the current client, if any.
+
+        Nulls ``_client`` first so a resulting disconnect callback is recognized as
+        stale, and bounds ``client.disconnect()`` with a timeout because a half-open
+        link can make it hang.
+        """
+        self._stop_poll()
         client = self._client
         self._client = None
         self._connected = False
         if client is not None and client.is_connected:
             try:
-                await client.disconnect()
-            except BleakError as err:
+                await asyncio.wait_for(client.disconnect(), timeout=_DISCONNECT_TIMEOUT)
+            except (BleakError, asyncio.TimeoutError) as err:
                 _LOGGER.debug("MEATER %s error on disconnect: %s", self.address, err)
+
+    # ------------------------------------------------------------------
+    # Active read poll / liveness watchdog
+    # ------------------------------------------------------------------
+
+    @callback
+    def _start_poll(self) -> None:
+        """Begin actively reading the probe on a timer (data + liveness heartbeat)."""
+        self._stop_poll()
+        self._poll_tick = 0
+        self._last_data_time = self.hass.loop.time()
+        self._cancel_poll = async_track_time_interval(
+            self.hass,
+            self._async_poll,
+            timedelta(seconds=_READ_POLL_INTERVAL),
+            name=f"meater_ble_poll:{self.address}",
+        )
+
+    @callback
+    def _stop_poll(self) -> None:
+        """Cancel the active read poll, if running."""
+        if self._cancel_poll is not None:
+            self._cancel_poll()
+            self._cancel_poll = None
+
+    async def _async_poll(self, _now: object) -> None:
+        """Read the probe and detect a dead link.
+
+        Runs under a single ``_polling`` guard so only one tick is ever in flight, and
+        so the recovery path cannot overlap a read. A successful read updates the
+        entities and the liveness clock; if neither a read nor a notification has
+        produced data within ``_STALL_TIMEOUT`` the link is half-open and is torn down
+        for a reconnect.
+        """
+        client = self._client
+        if (
+            not self._connected
+            or client is None
+            or self._closing
+            or self._connecting
+            or self._polling
+        ):
+            return
+        self._polling = True
+        try:
+            self._poll_tick += 1
+            try:
+                temp_raw = await asyncio.wait_for(
+                    client.read_gatt_char(CHAR_TEMPERATURE), timeout=_READ_TIMEOUT
+                )
+                batt_raw: bytes | None = None
+                if self._poll_tick % _BATTERY_POLL_EVERY == 0:
+                    with contextlib.suppress(
+                        BleakError, asyncio.TimeoutError, EOFError
+                    ):
+                        batt_raw = await asyncio.wait_for(
+                            client.read_gatt_char(CHAR_BATTERY), timeout=_READ_TIMEOUT
+                        )
+                self._process(bytes(temp_raw), batt_raw)
+            except (BleakError, asyncio.TimeoutError, EOFError) as err:
+                _LOGGER.debug("MEATER %s poll read failed (%s)", self.address, err)
+            # Liveness check, inside the guard so recovery cannot race another tick.
+            if (
+                self._connected
+                and not self._closing
+                and self.hass.loop.time() - self._last_data_time > _STALL_TIMEOUT
+            ):
+                await self._async_recover_stalled_link()
+        finally:
+            self._polling = False
+
+    async def _async_recover_stalled_link(self) -> None:
+        """Force a reconnect after the link went silent (half-open drop)."""
+        if not self._connected or self._closing:
+            return
+        _LOGGER.info(
+            "MEATER %s: no data for over %.0fs, link appears dead - reconnecting",
+            self.address,
+            _STALL_TIMEOUT,
+        )
+        # Route through the normal teardown so the disconnect is treated as expected
+        # (no duplicate grace/reschedule from the disconnect callback), then drive a
+        # single reconnect ourselves.
+        self._expected_disconnect = True
+        self._start_grace_period()
+        await self._async_disconnect()
+        self.async_update_listeners()
+        self._schedule_reconnect()
 
     # ------------------------------------------------------------------
     # Availability grace window
@@ -428,12 +618,17 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
 
     @callback
     def _start_grace_period(self) -> None:
-        """Keep entities on their last reading briefly while we try to reconnect."""
+        """Keep entities on their last reading briefly while we try to reconnect.
+
+        Measured from the first drop: if a window is already active it is left running,
+        so a probe that keeps flapping without reconnecting cannot serve a stale reading
+        for longer than one grace window.
+        """
         if self.data is None:
             # Never had a reading - nothing to preserve, stay unavailable.
             return
         if self._cancel_grace is not None:
-            self._cancel_grace()
+            return
         self._grace_active = True
         self._cancel_grace = async_call_later(
             self.hass, _AVAILABILITY_GRACE, self._async_grace_expired
@@ -471,6 +666,8 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
         self, characteristic: BleakGATTCharacteristic, data: bytearray
     ) -> None:
         """Handle a battery characteristic notification."""
+        # Any traffic from the probe proves the link is alive - feed the liveness clock.
+        self._last_data_time = self.hass.loop.time()
         raw = bytes(data)
         if len(raw) == 5:
             _LOGGER.debug(
@@ -495,6 +692,10 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
 
     def _process(self, temp_raw: bytes, batt_raw: bytes | None) -> None:
         """Decode raw bytes and push an update to all listeners."""
+        # Any packet (even a corrupt one) proves the link is alive - feed the liveness
+        # clock before the plausibility check so a run of bad packets does not look like
+        # a dead link.
+        self._last_data_time = self.hass.loop.time()
         if len(temp_raw) == 12:
             tip = _decode_tip_pro(temp_raw)
             ambient = _decode_ambient_pro(temp_raw)
@@ -539,7 +740,7 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
     # ------------------------------------------------------------------
 
     async def _async_update_data(self) -> MeaterData:
-        """Not used - data arrives via notify callbacks."""
+        """Not used - data arrives via notify callbacks and the active read poll."""
         if self.data is not None:
             return self.data
         raise UpdateFailed("No data yet - waiting for GATT connection")

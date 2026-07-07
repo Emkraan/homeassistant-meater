@@ -2,6 +2,25 @@
 
 All notable changes to this integration are documented here.
 
+## [2026.6.7] - 2026-07-07
+
+### Fixed
+
+- **Probe connects, streams for a while, then goes "unavailable" and never comes back on its own** ([#3](https://github.com/Emkraan/homeassistant-meater/issues/3), reported by @finity69x2). Fresh diagnostics showed the real failure is a *half-open* link, not discovery: temperature updates stop while the Bluetooth connection lingers, and in that state the probe stops advertising, so the advertisement-driven reconnect added in 2026.6.5/2026.6.6 has nothing to wake it. Two changes address this:
+  - **The integration now actively reads the probe on a timer** instead of relying only on GATT notifications. This is a reliable data path for probes that are read-populated rather than push-driven, and it doubles as a heartbeat: a read that fails or hangs is a definite sign the link is dead.
+  - **A liveness watchdog now forces a reconnect on a stalled link.** If neither a notification nor a successful read produces data within 30 seconds while nominally connected, the connection is torn down (with a bounded timeout, since a half-open link can make disconnect hang) and re-established. Previously a stall with no Bluetooth disconnect callback left the entities frozen on a stale reading indefinitely, with no recovery short of restarting Home Assistant.
+- **A late Bluetooth disconnect callback can no longer clobber a freshly reconnected session.** Disconnect callbacks are now ignored unless they belong to the current client, closing a race where a torn-down attempt's delayed callback tore down a healthy newer connection.
+- **Reconnect backoff now escalates correctly during app/Block contention.** A MEATER advertises continuously, and every advertisement was resetting the backoff to its 5 s floor, so a probe held by a phone app was retried every few seconds forever. The backoff now resets only on a successful connection or when the probe reappears after a period of silence (e.g. taken out of its charger), so genuine contention backs off gently while a returning probe still reconnects promptly.
+- **The availability grace window is now measured from the first drop.** A probe that repeatedly dropped and failed to reconnect could re-arm the full 90 s window on every blip and serve a stale reading well past 90 s; it is now capped from the first drop.
+
+### Added
+
+- **Actionable warning when no connectable path exists.** After repeated reconnect attempts with no connectable route to the probe, the log now explains the likely cause (a wedged Bluetooth-proxy connection slot or a signal too weak to hold a link) and the fix (update ESPHome on the proxy, move a connectable proxy closer, or reboot it).
+
+### Note
+
+- When a probe stops advertising entirely because a Bluetooth proxy is holding a **leaked/half-open connection slot** to it, no Home-Assistant-side call can force a remote proxy to release that slot (Bleak's stale-connection helpers only act on the host's own local adapters, not on ESP32/ESPHome proxies). The reliable fixes there are proxy-side: run current ESPHome firmware (a proxy slot-leak was fixed in ESPHome 2026.5.1), place a **connectable** proxy close enough to hold a strong link (a probe buried in a metal grill/smoker heavily attenuates BLE), and reboot the proxy if a slot has already wedged.
+
 ## [2026.6.6] - 2026-07-06
 
 ### Fixed
