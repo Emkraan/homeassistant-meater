@@ -2,6 +2,12 @@
 
 All notable changes to this integration are documented here.
 
+## [2026.6.9] - 2026-07-08
+
+### Fixed
+
+- **Auto-discovery now fires from any Bluetooth proxy, not only connectable ones** ([#3](https://github.com/Emkraan/homeassistant-meater/issues/3)). The discovery matchers left `connectable` unset, which defaults to `true` in Home Assistant, so a probe was only offered for setup when a *connectable* proxy happened to hear its advertisement. A MEATER is often heard by a passive (advertisement-only) scanner while a connectable proxy hears it weakly or intermittently, so auto-discovery was hit-or-miss. The matchers are now `connectable: false` (the same pattern Home Assistant's built-in Inkbird and Govee probe integrations use), so discovery fires on an advertisement from any scanner. The probe is still connected over a connectable proxy once discovered; manual add remains as a fallback.
+
 ## [2026.6.8] - 2026-07-07
 
 ### Changed
