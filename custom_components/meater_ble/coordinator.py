@@ -15,15 +15,20 @@ survives a half-open link:
 
 * GATT notify. The MEATER 2 Plus / Pro push temperature automatically after
   subscribing, so notifications give low-latency updates when they arrive.
-* An active read poll. The coordinator also reads the temperature (and, less often,
-  battery) characteristic on a timer. This is the reliable data path for probes that
-  are read-populated rather than notify-driven (the original MEATER/MEATER+ appear to
-  be), and it doubles as a liveness probe: a read that fails or hangs is a definitive
-  sign of a dead link. If neither notify nor a successful read produces data within a
-  stall window, the link is treated as half-open (a common ESP32/ESPHome-proxy failure
-  where the GATT layer dies but the proxy keeps the connection slot) and the connection
-  is torn down and re-established. A passive notify-silence timer alone cannot catch
-  this, because a half-open drop often fires no Bleak disconnect callback at all.
+* An active read poll. The coordinator also reads the temperature characteristic on a
+  timer. This is the reliable data path for probes that are read-populated (the original
+  MEATER/MEATER+ appear to be), and it doubles as a liveness probe: a read that fails or
+  hangs is a definitive sign of a dead link. It is also a keepalive: the read traffic keeps
+  the GATT link engaged. The original holds a rock-solid connection at the base cadence,
+  while the Pro / MEATER 2 Plus drops an idle link far sooner on the same proxy (see #5), so
+  the Pro is polled on a shorter cadence rather than left to its notifications alone.
+  Battery is read on a slow cadence for every probe; the Pro / 2 Plus battery format is not
+  decoded yet, so its raw bytes are logged at DEBUG to help work the decode out. If neither
+  notify nor a successful read produces data within a stall window, the link is treated as
+  half-open (a common ESP32/ESPHome-proxy failure where the GATT layer dies but the proxy
+  keeps the connection slot) and the connection is torn down and re-established. A passive
+  notify-silence timer alone cannot
+  catch this, because a half-open drop often fires no Bleak disconnect callback at all.
 
 Reconnection is both event-driven and self-scheduling. A bluetooth advertisement
 callback fires whenever the probe is seen in range by ANY scanner - connectable or
@@ -103,18 +108,25 @@ _RECONNECT_COOLDOWN_MAX = 30.0
 # flapping without ever reconnecting cannot serve a stale reading indefinitely.
 _AVAILABILITY_GRACE = 90.0
 
-# How often to actively read the temperature characteristic. This is the reliable data
-# path for read-populated probes and the heartbeat that detects a dead link. Kept
-# deliberately gentle: every read is an over-the-air request/response round trip through
-# the proxy, and on a weak link (a probe buried in a metal grill/smoker) frequent GATT
-# reads add congestion that can itself provoke a supervision-timeout drop. BLE best
-# practice is to prefer notifications and poll sparingly in a noisy 2.4 GHz environment,
-# so this is a slow heartbeat, not a fast poll: the MEATER 2 Plus / Pro stream via notify
-# anyway, and a 20 s cadence is plenty for a cook.
+# How often to actively read the temperature characteristic. Beyond populating data, the
+# read keeps the GATT link engaged: the original MEATER / MEATER+ is read-populated and
+# holds a rock-solid connection at this cadence on a proxy where the Pro / 2 Plus drops
+# (see #5), so the read is a keepalive as much as a data fetch. It also detects a dead link
+# (a read that fails or hangs). This is the cadence for the original / MEATER+.
 _READ_POLL_INTERVAL = 20.0
 
-# Read the battery characteristic once every N poll ticks (~60 s). Battery changes slowly,
-# so there is no reason to read it as often as temperature.
+# Shorter read cadence for the Pro / MEATER 2 Plus. On the same proxy where the original
+# holds for minutes, the 2 Plus drops its link within seconds of going idle (a ~12 s drop
+# with no traffic was seen in #5, before the 20 s poll ever fired). Leaning on its
+# notifications alone was not enough, so it is polled more often to keep the link engaged.
+# Still far gentler than a per-second poll, so it does not flood a marginal link. Kept
+# below the observed idle-drop window so a read lands before the link times out.
+_READ_POLL_INTERVAL_PRO = 8.0
+
+# Read the battery characteristic once every N poll ticks. Battery changes slowly, so there
+# is no reason to read it as often as temperature. Read for every probe family; the Pro /
+# MEATER 2 Plus battery is a 5-byte format not decoded yet, and reading it keeps the raw
+# bytes flowing to the DEBUG log so the decode can be worked out.
 _BATTERY_POLL_EVERY = 3
 
 # Per-read ceiling. A healthy read through a proxy completes in well under a second; a
@@ -123,7 +135,7 @@ _READ_TIMEOUT = 10.0
 
 # If neither a notification nor a successful read produces data within this window while
 # nominally connected, the link is half-open (the GATT layer is dead but no disconnect
-# callback fired). Tear it down and reconnect. Sized above the read cadence plus a
+# callback fired). Tear it down and reconnect. Sized above the slowest read cadence plus a
 # hung-read timeout (20 s + 10 s) with margin so normal jitter never trips it, and below
 # the grace window so a forced reconnect still has time to recover before entities flap
 # to unavailable.
@@ -253,6 +265,10 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
         self._polling = False
         self._poll_tick = 0
         self._last_data_time = 0.0
+        # Probe family, derived from the temperature payload width on each connect
+        # (12 bytes = Pro / MEATER 2 Plus, otherwise original MEATER / MEATER+). Only
+        # meaningful while connected; re-derived on every successful connect.
+        self._is_pro = False
         # Reconnect diagnostics.
         self._last_advert_time = 0.0
         self._no_path_count = 0
@@ -417,12 +433,19 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
                 if self._no_path_count == _NO_PATH_WARN_AFTER:
                     _LOGGER.warning(
                         "MEATER %s: no connectable Bluetooth path after repeated "
-                        "attempts. The probe is not reachable for a GATT connection. "
-                        "If a Bluetooth proxy is in range, its connection slot may be "
-                        "wedged (a known ESPHome issue, fixed in ESPHome 2026.5.1) or "
-                        "the probe's signal is too weak to hold a link. Try updating "
-                        "ESPHome on the proxy, moving a connectable proxy closer to the "
-                        "probe, or rebooting the proxy.",
+                        "attempts. If a phone (or the MEATER app or Base) can still find "
+                        "and connect to the probe while Home Assistant cannot, the probe "
+                        "and its signal are fine and the limiting factor is the "
+                        "ESP32/ESPHome Bluetooth proxy being unable to hold or "
+                        "re-establish the link. Things that help, roughly in order: make "
+                        "sure the MEATER app and Base are not connected (the probe accepts "
+                        "only one connection at a time); run a current ESPHome build and "
+                        "reboot the proxy (its Bluetooth stack can wedge, and a "
+                        "connection-slot leak was fixed in ESPHome 2026.5.1); avoid making "
+                        "one proxy hold several probe connections at once, since a single "
+                        "radio time-sharing them makes drops more likely; and if it still "
+                        "will not reconnect, power-cycling the probe on its charger clears "
+                        "the stuck state.",
                         self.address,
                     )
                 else:
@@ -449,13 +472,11 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
                 )
                 retry = True
                 return
-            # Connected: from here a failure must release the probe's single
-            # connection slot, or every future reconnect will fail.
+            # Connected: from here a failure on the TEMPERATURE path must release the
+            # probe's single connection slot, or every future reconnect will fail.
             try:
                 await client.start_notify(CHAR_TEMPERATURE, self._on_temp_notify)
-                await client.start_notify(CHAR_BATTERY, self._on_batt_notify)
                 temp_raw = await client.read_gatt_char(CHAR_TEMPERATURE)
-                batt_raw = await client.read_gatt_char(CHAR_BATTERY)
             except (BleakError, asyncio.TimeoutError) as err:
                 _LOGGER.debug(
                     "MEATER %s failed to subscribe after connecting (%s); "
@@ -468,6 +489,21 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
                     await client.disconnect()
                 retry = True
                 return
+            # Classify the probe family from the temperature payload width: the Pro /
+            # MEATER 2 Plus delivers a 12-byte notification, the original MEATER / MEATER+
+            # a 6-byte one. This drives notify-vs-read handling for temperature here and in
+            # the poll loop.
+            self._is_pro = len(temp_raw) == 12
+            # Battery is subscribed and read for every probe family - the Pro / 2 Plus
+            # 5-byte format is not decoded yet, so its raw bytes are logged at DEBUG to help
+            # work the decode out - but it is kept OUT of the connect-critical path: a
+            # battery-characteristic error (seen as "status=133" on some probes) must not
+            # tear down an otherwise-healthy temperature link and feed reconnect churn.
+            # batt_raw stays None if the battery path fails.
+            batt_raw: bytes | None = None
+            with contextlib.suppress(BleakError, asyncio.TimeoutError, EOFError):
+                await client.start_notify(CHAR_BATTERY, self._on_batt_notify)
+                batt_raw = await client.read_gatt_char(CHAR_BATTERY)
             self._client = client
             self._connected = True
             self._expected_disconnect = False
@@ -535,14 +571,19 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
 
     @callback
     def _start_poll(self) -> None:
-        """Begin actively reading the probe on a timer (data + liveness heartbeat)."""
+        """Begin actively reading the probe on a timer (data + liveness heartbeat).
+
+        The Pro / MEATER 2 Plus is polled on a shorter cadence than the original, because
+        it drops an idle link far sooner on the same proxy (see ``_READ_POLL_INTERVAL_PRO``).
+        """
         self._stop_poll()
         self._poll_tick = 0
         self._last_data_time = self.hass.loop.time()
+        interval = _READ_POLL_INTERVAL_PRO if self._is_pro else _READ_POLL_INTERVAL
         self._cancel_poll = async_track_time_interval(
             self.hass,
             self._async_poll,
-            timedelta(seconds=_READ_POLL_INTERVAL),
+            timedelta(seconds=interval),
             name=f"meater_ble_poll:{self.address}",
         )
 
@@ -574,21 +615,29 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
         self._polling = True
         try:
             self._poll_tick += 1
+            # Temperature: read every tick. This populates the read-driven original and,
+            # for the Pro / 2 Plus, keeps the link engaged (its notifications alone were not
+            # enough to hold it). A read that fails or hangs leaves the liveness clock to
+            # trip the half-open watchdog below.
             try:
                 temp_raw = await asyncio.wait_for(
                     client.read_gatt_char(CHAR_TEMPERATURE), timeout=_READ_TIMEOUT
                 )
-                batt_raw: bytes | None = None
-                if self._poll_tick % _BATTERY_POLL_EVERY == 0:
-                    with contextlib.suppress(
-                        BleakError, asyncio.TimeoutError, EOFError
-                    ):
-                        batt_raw = await asyncio.wait_for(
-                            client.read_gatt_char(CHAR_BATTERY), timeout=_READ_TIMEOUT
-                        )
-                self._process(bytes(temp_raw), batt_raw)
+                self._process(bytes(temp_raw), None)
             except (BleakError, asyncio.TimeoutError, EOFError) as err:
-                _LOGGER.debug("MEATER %s poll read failed (%s)", self.address, err)
+                _LOGGER.debug(
+                    "MEATER %s poll temperature read failed (%s)", self.address, err
+                )
+            # Battery: read on a slow cadence for every probe family, in its own suppressed
+            # read so a battery-characteristic failure never disturbs the temperature path.
+            # This is also how the Pro / 2 Plus 5-byte raw bytes are gathered (logged at
+            # DEBUG) for decode work.
+            if self._poll_tick % _BATTERY_POLL_EVERY == 0:
+                with contextlib.suppress(BleakError, asyncio.TimeoutError, EOFError):
+                    batt_raw = await asyncio.wait_for(
+                        client.read_gatt_char(CHAR_BATTERY), timeout=_READ_TIMEOUT
+                    )
+                    self._apply_battery(bytes(batt_raw))
             # Liveness check, inside the guard so recovery cannot race another tick.
             if (
                 self._connected
@@ -671,18 +720,16 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
         self, characteristic: BleakGATTCharacteristic, data: bytearray
     ) -> None:
         """Handle a battery characteristic notification."""
+        self._apply_battery(bytes(data))
+
+    def _apply_battery(self, raw: bytes) -> None:
+        """Feed a raw battery payload: refresh liveness, decode, and push an update.
+
+        Shared by the battery notification callback and the poll's battery read.
+        """
         # Any traffic from the probe proves the link is alive - feed the liveness clock.
         self._last_data_time = self.hass.loop.time()
-        raw = bytes(data)
-        if len(raw) == 5:
-            _LOGGER.debug(
-                "MEATER Pro %s battery raw (5 bytes): %s - decode not yet confirmed",
-                self.address,
-                raw.hex("-"),
-            )
-            battery = _decode_battery_pro(raw)
-        else:
-            battery = _decode_battery(raw)
+        battery = self._decode_battery_bytes(raw)
         if battery is None:
             return
         prev = self.data
@@ -694,6 +741,21 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
                 cook_state=prev.cook_state if prev else "idle",
             )
         )
+
+    def _decode_battery_bytes(self, raw: bytes) -> int | None:
+        """Decode a raw battery payload, logging the undecoded Pro 5-byte format at DEBUG.
+
+        The Pro / MEATER 2 Plus reports battery as 5 bytes that are not decoded yet; the
+        raw hex is logged so it can be captured at known charge levels and worked out.
+        """
+        if len(raw) == 5:
+            _LOGGER.debug(
+                "MEATER Pro %s battery raw (5 bytes): %s - decode not yet confirmed",
+                self.address,
+                raw.hex("-"),
+            )
+            return _decode_battery_pro(raw)
+        return _decode_battery(raw)
 
     def _process(self, temp_raw: bytes, batt_raw: bytes | None) -> None:
         """Decode raw bytes and push an update to all listeners."""
@@ -716,15 +778,7 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
             )
             return
         if batt_raw is not None:
-            if len(batt_raw) == 5:
-                _LOGGER.debug(
-                    "MEATER Pro %s battery raw (5 bytes): %s - decode not yet confirmed",
-                    self.address,
-                    batt_raw.hex("-"),
-                )
-                battery = _decode_battery_pro(batt_raw)
-            else:
-                battery = _decode_battery(batt_raw)
+            battery = self._decode_battery_bytes(batt_raw)
         else:
             battery = self.data.battery if self.data else None
         prev_state = self.data.cook_state if self.data else "idle"

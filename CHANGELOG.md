@@ -2,6 +2,18 @@
 
 All notable changes to this integration are documented here.
 
+## [2026.6.10] - 2026-07-16
+
+### Changed
+
+- **Battery reads are isolated from the temperature connection** ([#5](https://github.com/Emkraan/homeassistant-meater/issues/5)). Battery is subscribed and read on its own path, separate from temperature, so a battery-characteristic error (some probes report `status=133`) cannot disturb the temperature connection or trigger a reconnect. Battery is still read for every probe; the 2 Plus / Pro 5-byte battery format is not decoded yet, and its raw bytes continue to be logged at DEBUG so the decode can be worked out (see below).
+- **The MEATER 2 Plus / Pro is now polled more often to hold its connection** ([#5](https://github.com/Emkraan/homeassistant-meater/issues/5)). On the same Bluetooth proxy where an original MEATER holds a rock-solid connection for many minutes, a 2 Plus drops its link within seconds of going idle. The original is read-populated, so regular active reads keep its link engaged; the 2 Plus delivers temperature by notification, which on its own does not keep an idle link engaged as reliably. The active temperature read now doubles as a keepalive, and the 2 Plus is read on a shorter cadence (about every 8 seconds versus 20 for the original) so a read lands before the link times out. This benefits from testing on real hardware; the original MEATER / MEATER+ cadence is unchanged.
+
+### Note
+
+- **The disconnects are being worked from the probe-difference angle** ([#5](https://github.com/Emkraan/homeassistant-meater/issues/5)). The drops are HCI `reason 0x08` supervision timeouts at the Bluetooth link layer, and both an original MEATER and a 2 Plus drop on the same proxy, but the original recovers and holds while the 2 Plus drops within seconds of idle and does not. Since the original is rock-solid on the identical hardware, the 2 Plus is now kept engaged the same way the original is, by regular active reads, only more often (see above). This is the change to test first. If more is needed on a given setup, other levers are a current ESPHome build and a reboot, giving the 2 Plus its own proxy, and closing the MEATER app / Base so they do not hold the probe's single connection.
+- **The "no connectable path" warning is more accurate.** It now explains that if a phone or the MEATER Base can still connect to the probe while Home Assistant cannot, the probe itself is fine and the limiting factor is the ESP32/ESPHome proxy or the connection handling, and points to proxy-side steps (a current ESPHome build, a reboot, not overloading one proxy) plus closing the app/Base, rather than suggesting the signal is too weak or the probe has gone dormant.
+
 ## [2026.6.9] - 2026-07-08
 
 ### Fixed
