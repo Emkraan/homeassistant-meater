@@ -19,6 +19,19 @@
       "no_devices_found": "No Bluetooth devices found. Make sure the probe is out of its charger, turned on and within range of a Bluetooth adapter or proxy, then try again."
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "MEATER BLE options",
+        "data": {
+          "keepalive_interval": "Keepalive read interval (seconds)"
+        },
+        "data_description": {
+          "keepalive_interval": "How often a MEATER 2 Plus / Pro is actively read to keep its Bluetooth link alive. A lower value can hold a probe that keeps dropping after a few minutes, at the cost of more Bluetooth traffic. Default 8. No effect on the original MEATER / MEATER+."
+        }
+      }
+    }
+  },
   "entity": {
     "sensor": {
       "tip_temp": {

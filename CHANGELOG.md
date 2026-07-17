@@ -2,6 +2,13 @@
 
 All notable changes to this integration are documented here.
 
+## [2026.6.11] - 2026-07-17
+
+### Added
+
+- **MEATER 2 Plus / Pro battery percentage** ([#5](https://github.com/Emkraan/homeassistant-meater/issues/5)). The 5-byte battery payload decodes to the charge percentage from its first byte, confirmed across captures at full (`0x64` = 100), charged-from-empty (`0x0b` = 11), and near-empty (`0x07` = 7) levels. The battery sensor now reports a value for the Pro / 2 Plus instead of unknown.
+- **Configurable keepalive interval for the MEATER 2 Plus / Pro** ([#5](https://github.com/Emkraan/homeassistant-meater/issues/5)). The active read that keeps the 2 Plus link engaged defaults to every 8 seconds; a new option (the integration's **Configure** button) sets it anywhere from 3 to 60 seconds. The 8-second keepalive already raised hold time from about 12 seconds to 12-31 minutes in testing, and this exposes the knob so a setup where the probe still drops can try a shorter interval, at the cost of more Bluetooth traffic. Changing it reloads the entry. No effect on the original MEATER / MEATER+.
+
 ## [2026.6.10] - 2026-07-16
 
 ### Changed

@@ -22,8 +22,8 @@ survives a half-open link:
   the GATT link engaged. The original holds a rock-solid connection at the base cadence,
   while the Pro / MEATER 2 Plus drops an idle link far sooner on the same proxy (see #5), so
   the Pro is polled on a shorter cadence rather than left to its notifications alone.
-  Battery is read on a slow cadence for every probe; the Pro / 2 Plus battery format is not
-  decoded yet, so its raw bytes are logged at DEBUG to help work the decode out. If neither
+  Battery is read on a slow cadence for every probe (byte 0 of the Pro / 2 Plus 5-byte
+  payload is the charge percentage). If neither
   notify nor a successful read produces data within a stall window, the link is treated as
   half-open (a common ESP32/ESPHome-proxy failure where the GATT layer dies but the proxy
   keeps the connection slot) and the connection is torn down and re-established. A passive
@@ -81,7 +81,10 @@ from .const import (
     CHAR_BATTERY,
     CHAR_TEMPERATURE,
     COOK_REST_DELTA,
+    DEFAULT_KEEPALIVE_INTERVAL,
     DOMAIN,
+    KEEPALIVE_INTERVAL_MAX,
+    KEEPALIVE_INTERVAL_MIN,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -115,18 +118,20 @@ _AVAILABILITY_GRACE = 90.0
 # (a read that fails or hangs). This is the cadence for the original / MEATER+.
 _READ_POLL_INTERVAL = 20.0
 
-# Shorter read cadence for the Pro / MEATER 2 Plus. On the same proxy where the original
-# holds for minutes, the 2 Plus drops its link within seconds of going idle (a ~12 s drop
-# with no traffic was seen in #5, before the 20 s poll ever fired). Leaning on its
+# Default shorter read cadence for the Pro / MEATER 2 Plus. On the same proxy where the
+# original holds for minutes, the 2 Plus drops its link within seconds of going idle (a ~12 s
+# drop with no traffic was seen in #5, before the 20 s poll ever fired). Leaning on its
 # notifications alone was not enough, so it is polled more often to keep the link engaged.
-# Still far gentler than a per-second poll, so it does not flood a marginal link. Kept
-# below the observed idle-drop window so a read lands before the link times out.
-_READ_POLL_INTERVAL_PRO = 8.0
+# Still far gentler than a per-second poll, so it does not flood a marginal link. Kept below
+# the observed idle-drop window so a read lands before the link times out. Confirmed to raise
+# the hold time from ~12 s to 12-31 min (#5); user-tunable via the options flow (a still
+# shorter value can help a probe that keeps dropping) within
+# [KEEPALIVE_INTERVAL_MIN, KEEPALIVE_INTERVAL_MAX].
+_READ_POLL_INTERVAL_PRO = float(DEFAULT_KEEPALIVE_INTERVAL)
 
 # Read the battery characteristic once every N poll ticks. Battery changes slowly, so there
-# is no reason to read it as often as temperature. Read for every probe family; the Pro /
-# MEATER 2 Plus battery is a 5-byte format not decoded yet, and reading it keeps the raw
-# bytes flowing to the DEBUG log so the decode can be worked out.
+# is no reason to read it as often as temperature. Read for every probe family (the Pro /
+# MEATER 2 Plus 5-byte payload decodes to a percentage from byte 0).
 _BATTERY_POLL_EVERY = 3
 
 # Per-read ceiling. A healthy read through a proxy completes in well under a second; a
@@ -220,12 +225,17 @@ def _decode_ambient_pro(data: bytes) -> float:
 
 
 def _decode_battery_pro(data: bytes) -> int | None:
-    """Battery decode for MEATER Pro 5-byte format - not yet confirmed.
+    """Decode battery percentage from the 5-byte MEATER Pro / MEATER 2 Plus payload.
 
-    The raw bytes are logged at DEBUG level to help gather data for decoding.
-    Returns None until the formula is validated.
+    Byte 0 is the charge percentage. Confirmed across samples (see #5): a full probe reads
+    0x64 (100), with a transient 0x65 (101) right after a read - hence the clamp; a probe
+    charged from empty for a couple of minutes reads 0x0b (11); near-empty captures read
+    0x07 (7). The later bytes track a finer drain/voltage counter that the integer percentage
+    the MEATER app shows does not need.
     """
-    return None
+    if not data:
+        return None
+    return min(100, data[0])
 
 
 def _derive_cook_state(tip: float, prev_state: str, prev_tip: float | None) -> str:
@@ -241,14 +251,30 @@ def _derive_cook_state(tip: float, prev_state: str, prev_tip: float | None) -> s
 class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
     """Maintains a persistent, self-healing GATT connection to a MEATER probe."""
 
-    def __init__(self, hass: HomeAssistant, address: str) -> None:
-        """Initialize."""
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        address: str,
+        keepalive_interval: float | None = None,
+    ) -> None:
+        """Initialize.
+
+        ``keepalive_interval`` (seconds, from the options flow) overrides the Pro / MEATER 2
+        Plus active-read cadence; ``None`` uses the built-in default. Clamped to the allowed
+        range so a bad option can neither hammer the link nor stall the watchdog.
+        """
         super().__init__(
             hass,
             _LOGGER,
             name=f"{DOMAIN}:{address}",
         )
         self.address = address
+        self._keepalive_interval = _READ_POLL_INTERVAL_PRO
+        if keepalive_interval is not None:
+            self._keepalive_interval = max(
+                float(KEEPALIVE_INTERVAL_MIN),
+                min(float(KEEPALIVE_INTERVAL_MAX), float(keepalive_interval)),
+            )
         self._client: BleakClientWithServiceCache | None = None
         self._connected = False
         self._connecting = False
@@ -494,12 +520,10 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
             # a 6-byte one. This drives notify-vs-read handling for temperature here and in
             # the poll loop.
             self._is_pro = len(temp_raw) == 12
-            # Battery is subscribed and read for every probe family - the Pro / 2 Plus
-            # 5-byte format is not decoded yet, so its raw bytes are logged at DEBUG to help
-            # work the decode out - but it is kept OUT of the connect-critical path: a
-            # battery-characteristic error (seen as "status=133" on some probes) must not
-            # tear down an otherwise-healthy temperature link and feed reconnect churn.
-            # batt_raw stays None if the battery path fails.
+            # Battery is subscribed and read for every probe family, but kept OUT of the
+            # connect-critical path: a battery-characteristic error (seen as "status=133" on
+            # some probes) must not tear down an otherwise-healthy temperature link and feed
+            # reconnect churn. batt_raw stays None if the battery path fails.
             batt_raw: bytes | None = None
             with contextlib.suppress(BleakError, asyncio.TimeoutError, EOFError):
                 await client.start_notify(CHAR_BATTERY, self._on_batt_notify)
@@ -574,12 +598,13 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
         """Begin actively reading the probe on a timer (data + liveness heartbeat).
 
         The Pro / MEATER 2 Plus is polled on a shorter cadence than the original, because
-        it drops an idle link far sooner on the same proxy (see ``_READ_POLL_INTERVAL_PRO``).
+        it drops an idle link far sooner on the same proxy (see ``_READ_POLL_INTERVAL_PRO``);
+        that cadence is user-tunable via ``self._keepalive_interval`` (options flow).
         """
         self._stop_poll()
         self._poll_tick = 0
         self._last_data_time = self.hass.loop.time()
-        interval = _READ_POLL_INTERVAL_PRO if self._is_pro else _READ_POLL_INTERVAL
+        interval = self._keepalive_interval if self._is_pro else _READ_POLL_INTERVAL
         self._cancel_poll = async_track_time_interval(
             self.hass,
             self._async_poll,
@@ -743,16 +768,14 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
         )
 
     def _decode_battery_bytes(self, raw: bytes) -> int | None:
-        """Decode a raw battery payload, logging the undecoded Pro 5-byte format at DEBUG.
+        """Decode a raw battery payload (2-byte original or 5-byte Pro / 2 Plus).
 
-        The Pro / MEATER 2 Plus reports battery as 5 bytes that are not decoded yet; the
-        raw hex is logged so it can be captured at known charge levels and worked out.
+        The 5-byte Pro payload's raw hex is still logged at DEBUG to catch any format
+        variation across firmware.
         """
         if len(raw) == 5:
             _LOGGER.debug(
-                "MEATER Pro %s battery raw (5 bytes): %s - decode not yet confirmed",
-                self.address,
-                raw.hex("-"),
+                "MEATER Pro %s battery raw (5 bytes): %s", self.address, raw.hex("-")
             )
             return _decode_battery_pro(raw)
         return _decode_battery(raw)

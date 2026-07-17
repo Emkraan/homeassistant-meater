@@ -10,6 +10,15 @@ MODEL = "MEATER / MEATER+ / MEATER Pro"
 
 PLATFORMS: list[Platform] = [Platform.SENSOR]
 
+# Options-flow key: override the active keepalive read interval (seconds) for the Pro /
+# MEATER 2 Plus. A lower value can hold a link that drops after a few minutes on a marginal
+# proxy, at the cost of more Bluetooth traffic; it has no effect on the original MEATER /
+# MEATER+. Unset uses DEFAULT_KEEPALIVE_INTERVAL.
+CONF_KEEPALIVE_INTERVAL = "keepalive_interval"
+DEFAULT_KEEPALIVE_INTERVAL = 8
+KEEPALIVE_INTERVAL_MIN = 3
+KEEPALIVE_INTERVAL_MAX = 60
+
 # Bluetooth SIG company identifier assigned to Apption Labs Inc. (maker of MEATER,
 # now owned by Traeger) - 0x037B. This is broadcast in the manufacturer-specific data
 # (AD type 0xFF) of the PRIMARY advertising packet, so it is present on every advertisement

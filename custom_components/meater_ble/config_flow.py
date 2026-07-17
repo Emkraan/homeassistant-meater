@@ -12,11 +12,26 @@ from homeassistant.components.bluetooth import (
     BluetoothServiceInfoBleak,
     async_discovered_service_info,
 )
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlow,
+)
 from homeassistant.const import CONF_ADDRESS
+from homeassistant.core import callback
+from homeassistant.helpers.selector import (
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
+)
 
 from .const import (
+    CONF_KEEPALIVE_INTERVAL,
+    DEFAULT_KEEPALIVE_INTERVAL,
     DOMAIN,
+    KEEPALIVE_INTERVAL_MAX,
+    KEEPALIVE_INTERVAL_MIN,
     KNOWN_MEATER_SERVICE_UUIDS,
     MANUFACTURER,
     MEATER_DOCK_SERVICE_UUID,
@@ -85,6 +100,12 @@ class MeaterBLEConfigFlow(ConfigFlow, domain=DOMAIN):
     """
 
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> MeaterBLEOptionsFlow:
+        """Return the options flow for tuning the keepalive interval."""
+        return MeaterBLEOptionsFlow()
 
     def __init__(self) -> None:
         """Initialize."""
@@ -181,5 +202,43 @@ class MeaterBLEConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="user",
             data_schema=vol.Schema(
                 {vol.Required(CONF_ADDRESS): vol.In(self._discovered_devices)}
+            ),
+        )
+
+
+class MeaterBLEOptionsFlow(OptionsFlow):
+    """Options flow: tune the Pro / MEATER 2 Plus keepalive read interval.
+
+    A lower interval reads the probe more often to keep its BLE link engaged, which can hold
+    a 2 Plus / Pro that otherwise drops after a few minutes on a marginal proxy, at the cost
+    of more Bluetooth traffic. It has no effect on the original MEATER / MEATER+.
+    """
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Manage the keepalive interval option."""
+        if user_input is not None:
+            return self.async_create_entry(data=user_input)
+
+        current = self.config_entry.options.get(
+            CONF_KEEPALIVE_INTERVAL, DEFAULT_KEEPALIVE_INTERVAL
+        )
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_KEEPALIVE_INTERVAL, default=current
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=KEEPALIVE_INTERVAL_MIN,
+                            max=KEEPALIVE_INTERVAL_MAX,
+                            step=1,
+                            mode=NumberSelectorMode.BOX,
+                            unit_of_measurement="s",
+                        )
+                    ),
+                }
             ),
         )
