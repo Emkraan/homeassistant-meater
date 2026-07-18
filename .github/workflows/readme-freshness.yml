@@ -1,0 +1,110 @@
+name: readme-freshness
+
+# ============================================================================
+# Canonical README-freshness gate (SELF-CONTAINED form). Reference implementation
+# for docs/standards/readme-freshness-standard.md.
+#
+# This file is COPIED VERBATIM into every non-archived Emkraan repo at
+# .github/workflows/readme-freshness.yml (like LICENSE / .gitignore / dependabot.yml).
+# It is NOT a shared/reusable workflow and there is NO public Emkraan/.github repo:
+# a copied-in file has no cross-repo dependency, so it survives a private -> public
+# repo flip and runs on forks of the public repos. fleet-compliance.py hash-checks
+# each repo's copy against THIS canonical; scripts/sync-readme-freshness.sh propagates it.
+#
+# Public-safety / hygiene: this file is generic git-diff logic only. Never add a
+# hostname, IP, /opt path, secret, or webhook URL; any value a future step needs is
+# a ${{ secrets.X }} / ${{ inputs.Y }} reference, never a literal.
+#
+# It fails a pull request (or a direct push to main) when a deployment-affecting
+# file changed but no README.md changed in the same range.
+#   Escape hatch 1: put [readme-ok] in any commit message in the range.
+#   Escape hatch 2: add the 'readme-ok' label to the PR.
+# Deploy-bot sha-pin commits carry [skip ci], which GitHub honors natively, so
+# mechanical pin-backs never trigger this workflow.
+# ============================================================================
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  readme-freshness:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Enforce README freshness on deploy-affecting changes
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.sha }}
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            BASE="$PR_BASE_SHA"
+            HEAD="$PR_HEAD_SHA"
+          else
+            BASE="$PUSH_BEFORE"
+            HEAD="$PUSH_AFTER"
+          fi
+
+          # New branch / first push / missing base: fall back to the root commit.
+          if [ -z "${BASE}" ] || [ "${BASE}" = "0000000000000000000000000000000000000000" ] \
+             || ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+            BASE="$(git rev-list --max-parents=0 "${HEAD}" | tail -n 1)"
+          fi
+
+          echo "Comparing ${BASE}..${HEAD}"
+
+          # Escape hatch 1: [readme-ok] token in any commit message in the range.
+          if git log --format='%B' "${BASE}..${HEAD}" | grep -qiF '[readme-ok]'; then
+            echo "::notice::[readme-ok] token found in commit range - freshness gate skipped."
+            exit 0
+          fi
+
+          # Escape hatch 2: 'readme-ok' label on the PR.
+          if [ "$EVENT_NAME" = "pull_request" ] && printf '%s' "$PR_LABELS" | grep -qi 'readme-ok'; then
+            echo "::notice::readme-ok label present - freshness gate skipped."
+            exit 0
+          fi
+
+          # git pathspecs: a leading '*' spans '/', so these match at any depth
+          # (per-subdir for the monorepos).
+          DEPLOY_PATHSPECS=(
+            '*Dockerfile'
+            '*.Dockerfile'
+            '*portainer-stack.yml'
+            '*docker-compose.yml'
+            '*.env.example'
+            '*terraform/*'
+            '.github/workflows/*'
+            '*/.github/workflows/*'
+          )
+
+          DEPLOY_CHANGED="$(git diff --name-only "${BASE}" "${HEAD}" -- "${DEPLOY_PATHSPECS[@]}" || true)"
+          README_CHANGED="$(git diff --name-only "${BASE}" "${HEAD}" -- '*README.md' || true)"
+
+          echo "--- Deploy-affecting files changed ---"
+          echo "${DEPLOY_CHANGED:-<none>}"
+          echo "--- README files changed ---"
+          echo "${README_CHANGED:-<none>}"
+
+          if [ -n "${DEPLOY_CHANGED}" ] && [ -z "${README_CHANGED}" ]; then
+            echo "::error::Deployment-affecting files changed but no README.md was updated. Update the relevant README.md (per-subdir for monorepos), or add [readme-ok] to a commit message or the 'readme-ok' PR label if this change is genuinely documentation-neutral."
+            exit 1
+          fi
+
+          echo "README freshness check passed."
