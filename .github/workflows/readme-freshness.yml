@@ -45,6 +45,7 @@ jobs:
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
+          ACTOR: ${{ github.actor }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PUSH_BEFORE: ${{ github.event.before }}
@@ -52,6 +53,15 @@ jobs:
           PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
         run: |
           set -euo pipefail
+
+          # Mechanical bot changes are README-neutral by nature: dependabot version
+          # bumps (incl. github-actions bumps that edit .github/workflows/*) and the
+          # deploy bot's pin-backs. Exempt them so the required check never blocks their
+          # auto-merge. Human PRs still go through the gate below.
+          if [ "$ACTOR" = "dependabot[bot]" ] || [ "$ACTOR" = "github-actions[bot]" ]; then
+            echo "::notice::actor $ACTOR is a mechanical bot; freshness gate skipped."
+            exit 0
+          fi
 
           if [ "$EVENT_NAME" = "pull_request" ]; then
             BASE="$PR_BASE_SHA"
