@@ -2,7 +2,17 @@
 
 All notable changes to this integration are documented here.
 
-## [2026.6.11] - 2026-07-17
+## [2026.6.12b1] - 2026-07-17
+
+Beta. Enable beta versions in HACS to install it.
+
+### Added
+
+- **Direct reconnect-by-address when the proxy stops reporting the probe** ([#5](https://github.com/Emkraan/homeassistant-meater/issues/5)). After a drop, an ESP32/ESPHome proxy can stop surfacing the probe's advertisements for minutes even though the probe is still advertising (a phone or the MEATER charger reconnect to it immediately). Home Assistant previously waited for a fresh advertisement that never arrived, so the entity stayed unavailable until the probe was power-cycled. The integration now remembers the last connectable device and, when no fresh advertisement is available, requests an on-demand active scan and attempts a direct connect-by-address through the proxy, the same approach the built-in Yale Access BLE integration uses. That makes the proxy start a fresh direct-connect attempt (its own address-filtered scan) that is not blocked by the stalled advertisement scanner, so it can recover on its own the way a phone does.
+
+### Note
+
+- This targets the post-drop reconnect, not the ~24-30 minute supervision-timeout drop itself (that remains a link-layer event the keepalive read only makes less frequent). It also cannot help when the proxy's radio is genuinely wedged (a leaked connection slot, or a scanner that does not restart after a connection); those need a proxy restart on a current ESPHome build, since no Home Assistant call can free a remote proxy's slot. This is a beta so the reconnect path can be confirmed on real hardware before it ships to stable.
 
 ### Added
 
