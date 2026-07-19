@@ -2,7 +2,14 @@
 
 All notable changes to this integration are documented here.
 
-## [2026.6.12b1] - 2026-07-17
+## [2026.6.12b2] - 2026-07-19
+
+Beta. Enable beta versions in HACS to install it.
+
+### Changed
+
+- **Reconnect no longer forces repeated system-wide active scans** ([#5](https://github.com/Emkraan/homeassistant-meater/issues/5)). The 2026.6.12b1 reconnect path asked Home Assistant to run an on-demand active scan while a probe was disconnected. That request is system-wide (every proxy scans), and with more than one probe disconnected it repeated continuously, which on a single-radio ESP32 competes with the probes that are still connected and can shorten how long they hold. The active-scan request is removed; the direct connect-by-address introduced in 2026.6.12b1 already starts the proxy's own scan for the probe, so re-seeing it does not depend on it.
+- **A probe with no free connection slot stops retrying hard** ([#5](https://github.com/Emkraan/homeassistant-meater/issues/5)). An ESP32/ESPHome proxy has a fixed number of connection slots (three by default). When more probes than slots are set up on one proxy, the extra probe cannot connect; it now recognizes the out-of-slots condition, backs off to the maximum interval, and stops issuing connect attempts until it is seen advertising again, instead of churning connect attempts that compete with the connected probes. To run more probes on one proxy, raise `connection_slots` in its ESPHome config (default 3, up to 9, 5 or fewer recommended).
 
 Beta. Enable beta versions in HACS to install it.
 
