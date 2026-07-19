@@ -1,0 +1,69 @@
+name: Dependabot auto-merge
+
+# Minor and patch Dependabot PRs merge themselves once both existing
+# validate.yml checks (hassfest, HACS) report success. Major bumps are
+# never touched here and always wait for manual review. This repo's
+# dependabot.yml only watches github-actions, and there's no build/deploy
+# step for a HACS custom integration (users pull updates via HACS on their
+# own Home Assistant instance), so there is no post-merge dispatch here.
+#
+# See emkraan-studio's dependabot-auto-merge.yml for the full rationale
+# behind pull_request_target, the check_name gate, and the missing
+# approval step.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+  actions: write
+
+jobs:
+  auto-merge:
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@v3
+        with:
+          github-token: "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: Wait for checks and merge
+        if: steps.metadata.outputs.update-type != 'version-update:semver-major'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          CHECK_NAMES=("hassfest" "HACS")
+          for check_name in "${CHECK_NAMES[@]}"; do
+            for i in $(seq 1 60); do
+              run="$(gh api "repos/$REPO/commits/$SHA/check-runs" --jq --arg n "$check_name" '.check_runs[] | select(.name == $n) // empty' | head -1)"
+              status="$(echo "$run" | jq -r '.status // "queued"' 2>/dev/null || echo queued)"
+              conclusion="$(echo "$run" | jq -r '.conclusion // ""' 2>/dev/null || echo "")"
+              if [ "$status" = "completed" ]; then
+                case "$conclusion" in
+                  success|neutral|skipped)
+                    echo "$check_name passed."
+                    break
+                    ;;
+                  *)
+                    echo "$check_name concluded '$conclusion'."
+                    exit 1
+                    ;;
+                esac
+              fi
+              echo "Waiting on $check_name (status: $status)..."
+              sleep 15
+            done
+            if [ "$status" != "completed" ]; then
+              echo "Timed out waiting for $check_name."
+              exit 1
+            fi
+          done
+          gh pr merge --squash --delete-branch "$PR_URL"
