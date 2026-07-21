@@ -43,7 +43,7 @@ jobs:
           CHECK_NAMES=("hassfest" "HACS")
           for check_name in "${CHECK_NAMES[@]}"; do
             for i in $(seq 1 60); do
-              run="$(gh api "repos/$REPO/commits/$SHA/check-runs" --jq --arg n "$check_name" '.check_runs[] | select(.name == $n) // empty' | head -1)"
+              run="$(gh api "repos/$REPO/commits/$SHA/check-runs" | jq -c --arg n "$check_name" '.check_runs[] | select(.name == $n) // empty' | head -1)"
               status="$(echo "$run" | jq -r '.status // "queued"' 2>/dev/null || echo queued)"
               conclusion="$(echo "$run" | jq -r '.conclusion // ""' 2>/dev/null || echo "")"
               if [ "$status" = "completed" ]; then
