@@ -51,6 +51,9 @@
           "approaching_target": "Approaching Target",
           "resting": "Resting"
         }
+      },
+      "signal_strength": {
+        "name": "Signal Strength"
       }
     }
   }

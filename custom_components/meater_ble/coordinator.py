@@ -30,28 +30,34 @@ survives a half-open link:
   notify-silence timer alone cannot
   catch this, because a half-open drop often fires no Bleak disconnect callback at all.
 
-Reconnection is event-driven, self-scheduling, and advert-independent as a last resort. A
-bluetooth advertisement callback fires whenever the probe is seen by ANY scanner, and a
-self-rescheduling backoff loop keeps retrying while disconnected. When HA has no fresh
-connectable advertisement at all (through an ESP32 proxy the passive observer can sit at
-"discovered: 0" for minutes after a drop even though the probe is still advertising - a phone
-or the MEATER charger reconnect at once), the loop does not give up: it attempts a direct
-connect-by-address from the last BLEDevice it connected through. bleak-esphome builds that
-connection from the cached device's address/source/address_type without reading current
-discovery, and the proxy fires a fresh direct-connect initiator (its own address-filtered scan)
-that is not gated on the stalled observer - the same mechanism yalexs_ble uses (see #5). That
-fallback is suppressed while the proxy is out of connection slots, so a probe that cannot get a
-slot does not churn connect attempts. A short availability grace window keeps the last reading
-visible across brief drops instead of flapping every entity to unavailable while a reconnect is
-in flight.
+Reconnection is both event-driven and self-scheduling. A bluetooth advertisement
+callback fires whenever the probe is seen in range by ANY scanner - connectable or
+not - and a self-rescheduling backoff loop keeps retrying while disconnected even
+when no connectable adapter has a fresh view of the probe yet. This matters through
+Bluetooth proxies: a probe is often heard continuously by a passive (non-connectable)
+scanner while the only connectable proxy hears it weakly and intermittently (see #3),
+so recovery must not depend on a connectable advertisement alone. A short availability
+grace window keeps the last reading visible across brief drops instead of flapping
+every entity to unavailable while a reconnect is in flight.
 
-Note: the direct connect-by-address above recovers the common case where the ESP32's
-observer stalls but its radio can still hear the probe. It cannot help when the radio itself
-is wedged - a leaked/half-open connection slot, or the ESPHome scan-not-restarted-after-connect
-bug - because no HA-side API can force a remote proxy to free a slot or restart its scanner
-(bleak_retry_connector's stale-connection helpers are BlueZ-local and proxy-blind). The
-coordinator surfaces sustained failure with an actionable warning; the fix there is proxy-side
-(current ESPHome and a reboot).
+Note: when a probe stops advertising entirely because a Bluetooth proxy is holding a
+leaked/half-open connection slot to it, no HA-side API can force a remote proxy to
+release that slot (bleak_retry_connector's stale-connection helpers are BlueZ-local
+and proxy-blind). The coordinator surfaces this with an actionable warning after
+sustained failure to find any connectable path; the fix there is proxy-side (update
+ESPHome firmware or reboot the proxy).
+
+Note on the MEATER 2 Plus / Pro specifically (#5): field reports show it can, after a
+drop, stop sending connectable advertisements or start refusing/stalling connections
+until it is power-cycled on its charger, even with a strong signal and even while a
+phone can still see it in a scan. Bluetooth gives no central (a phone, a proxy, or
+this integration) a way to open a connection to, or wake, a peripheral that is not
+advertising connectably, so this is outside what Home Assistant or the proxy can
+influence; a cached-device "connect anyway" attempt was tried and reverted; it cannot
+succeed here (Home Assistant's Bluetooth stack only opens a connection to an address a
+connectable scanner has recently heard, so it fails identically to waiting). The
+keepalive read is the effective mitigation, since it avoids the drop rather than
+needing to recover from it.
 
 Decode formulas derived from ESPHome/community reverse-engineering.
 """
@@ -66,13 +72,8 @@ import logging
 import struct
 
 from bleak.backends.characteristic import BleakGATTCharacteristic
-from bleak.backends.device import BLEDevice
 from bleak.exc import BleakError
-from bleak_retry_connector import (
-    BleakClientWithServiceCache,
-    BleakOutOfConnectionSlotsError,
-    establish_connection,
-)
+from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
 
 from homeassistant.components import bluetooth
 from homeassistant.components.bluetooth import (
@@ -161,6 +162,13 @@ _STALL_TIMEOUT = 45.0
 # can make client.disconnect() hang, so recovery must not block on it.
 _DISCONNECT_TIMEOUT = 10.0
 
+# Minimum change (dBm) before the diagnostic signal-strength sensor updates. Real BLE RSSI
+# jitters a few dBm between consecutive advertisements from ambient noise alone, so an
+# exact-match dedup would still push a new state on nearly every advertisement while
+# disconnected (when the probe may be advertising rapidly during a reconnect attempt).
+# This keeps the (opt-in, disabled-by-default) sensor meaningful without that churn.
+_RSSI_UPDATE_THRESHOLD = 3
+
 # A gap this long since the previous advertisement means the probe genuinely reappeared
 # (e.g. taken out of its charger) rather than the rapid advertisement stream of a probe
 # we keep failing to hold. Only then is the reconnect backoff reset, so app/Block
@@ -182,6 +190,10 @@ class MeaterData:
     ambient_temp: float | None
     battery: int | None
     cook_state: str  # idle | cooking | resting
+    # RSSI of the most recent advertisement seen (diagnostic only). The probe does not
+    # advertise while a GATT connection is held, so this freezes at whatever it was just
+    # before connecting, or since the last drop - it is not a live connection RSSI.
+    rssi: int | None = None
 
 
 def _decode_tip(data: bytes) -> float:
@@ -309,20 +321,8 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
         # Reconnect diagnostics.
         self._last_advert_time = 0.0
         self._no_path_count = 0
-        # Last BLEDevice HA handed us on a successful connect. Reused to attempt a direct
-        # connect-by-address when HA has no fresh connectable advertisement after a drop: the
-        # probe usually keeps advertising (a phone/charger reconnect at once) while the ESP32's
-        # passive observer can sit at "discovered: 0" for minutes. Connecting from the cached
-        # device makes the proxy fire a fresh direct-connect initiator (esp_ble_gattc_open with
-        # is_direct=true) that runs its own address-filtered scan, independent of that stalled
-        # observer - the same way yalexs_ble reconnects through proxies.
-        self._last_ble_device: BLEDevice | None = None
-        # Set when a connect attempt fails because the proxy is out of connection slots. While
-        # set, the direct connect-by-address fallback is suppressed (scanning cannot free a
-        # slot) and the backoff is held at its ceiling, so a probe that can never get a slot
-        # (e.g. more probes than the proxy has slots) stops churning connect attempts. Cleared
-        # as soon as HA has a fresh connectable advertisement for the probe again.
-        self._out_of_slots = False
+        # RSSI of the most recent advertisement seen (diagnostic only - see MeaterData.rssi).
+        self._last_rssi: int | None = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -402,13 +402,44 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
         while we keep failing to hold it (app/Block contention) must not pin the backoff
         at its floor.
         """
-        if self._connected or self._closing:
+        if self._closing:
+            return
+        self._async_track_rssi(service_info.rssi)
+        if self._connected:
             return
         now = self.hass.loop.time()
         if now - self._last_advert_time > _ADVERT_SILENCE_RESET:
             self._reset_reconnect_backoff()
         self._last_advert_time = now
         self._schedule_connect()
+
+    @callback
+    def _async_track_rssi(self, rssi: int) -> None:
+        """Record the probe's most recent advertisement RSSI (diagnostic only).
+
+        The probe does not advertise while a GATT connection is held (that is why HA
+        loses sight of it once connected - see the module docstring), so this value
+        freezes at whatever it was just before connecting, or since the last drop; it
+        is not a live connection RSSI. Still useful to gauge whether a weak signal is
+        contributing to drops. Skips small jitter so the sensor does not update on
+        nearly every advertisement while disconnected (see ``_RSSI_UPDATE_THRESHOLD``).
+        """
+        if (
+            self._last_rssi is not None
+            and abs(rssi - self._last_rssi) < _RSSI_UPDATE_THRESHOLD
+        ):
+            return
+        self._last_rssi = rssi
+        prev = self.data
+        self.async_set_updated_data(
+            MeaterData(
+                tip_temp=prev.tip_temp if prev else None,
+                ambient_temp=prev.ambient_temp if prev else None,
+                battery=prev.battery if prev else None,
+                cook_state=prev.cook_state if prev else "idle",
+                rssi=rssi,
+            )
+        )
 
     @callback
     def _reset_reconnect_backoff(self) -> None:
@@ -465,21 +496,6 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
         self._cancel_reconnect = None
         self._schedule_connect()
 
-    def _source_still_registered(self, device: BLEDevice) -> bool:
-        """Whether the proxy that produced this cached BLEDevice is still connected.
-
-        A cached device is only usable while its source proxy is registered (its connector is
-        bound to that proxy client). Fail-safe: any error means "not usable" so the connect
-        loop falls through to its normal backoff rather than stalling.
-        """
-        details = device.details
-        source = details.get("source") if isinstance(details, dict) else None
-        if not source:
-            return False
-        with contextlib.suppress(Exception):
-            return bluetooth.async_scanner_by_source(self.hass, source) is not None
-        return False
-
     async def _async_connect(self) -> None:
         """Establish the connection and subscribe to notifications."""
         if self._connected or self._closing:
@@ -490,50 +506,27 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
             ble_device = bluetooth.async_ble_device_from_address(
                 self.hass, self.address, connectable=True
             )
-            if ble_device is not None:
-                # A fresh connectable advertisement means the slot situation may have changed;
-                # allow direct-connect attempts again.
-                self._out_of_slots = False
-            elif not self._out_of_slots:
-                # HA has no fresh connectable advertisement for the probe. Instead of giving
-                # up, fall back to the last device we connected through and let the proxy
-                # attempt a direct connect-by-address. bleak-esphome builds the connection from
-                # the cached device's address + source + address_type (it does not read current
-                # discovery), and the ESP32 fires a fresh direct-connect initiator with its own
-                # address-filtered scan, independent of the passive observer that may be stuck
-                # at "discovered: 0". This is how a phone/charger recover and how yalexs_ble
-                # reconnects through proxies. Only reuse the cached device while its source
-                # proxy is still registered; and not while the proxy is out of connection slots
-                # (a direct connect cannot succeed then, and scanning cannot free a slot), so a
-                # probe with no available slot stops churning connect attempts (see #3, #5).
-                cached = self._last_ble_device
-                if cached is not None and self._source_still_registered(cached):
-                    _LOGGER.debug(
-                        "MEATER %s: no fresh advertisement; attempting a direct connect "
-                        "from the last-known device",
-                        self.address,
-                    )
-                    ble_device = cached
             if ble_device is None:
-                # No usable path (no fresh advert and no still-valid cached device). Keep
-                # retrying on the backoff timer.
+                # No connectable adapter has a path to the probe yet - through a proxy
+                # it may currently be heard only by a passive scanner. Keep retrying on
+                # the backoff timer rather than waiting for a connectable advertisement
+                # that may never arrive (see #3).
                 self._no_path_count += 1
                 if self._no_path_count == _NO_PATH_WARN_AFTER:
                     _LOGGER.warning(
                         "MEATER %s: no connectable Bluetooth path after repeated "
-                        "attempts. If a phone (or the MEATER app or Base) can still find "
-                        "and connect to the probe while Home Assistant cannot, the probe "
-                        "and its signal are fine and the limiting factor is the "
-                        "ESP32/ESPHome Bluetooth proxy being unable to hold or "
-                        "re-establish the link. Things that help, roughly in order: make "
-                        "sure the MEATER app and Base are not connected (the probe accepts "
-                        "only one connection at a time); run a current ESPHome build and "
-                        "reboot the proxy (its Bluetooth stack can wedge, and a "
-                        "connection-slot leak was fixed in ESPHome 2026.5.1); avoid making "
-                        "one proxy hold several probe connections at once, since a single "
-                        "radio time-sharing them makes drops more likely; and if it still "
-                        "will not reconnect, power-cycling the probe on its charger clears "
-                        "the stuck state.",
+                        "attempts. First checks: make sure the MEATER app and Base are "
+                        "not connected (the probe accepts only one connection at a "
+                        "time), and avoid making one proxy hold several probe "
+                        "connections at once (a single radio time-sharing them makes "
+                        "drops more likely). A stale ESPHome build or a wedged proxy "
+                        "slot are also possible (a slot leak was fixed in ESPHome "
+                        "2026.5.1) - updating and rebooting the proxy can help with "
+                        "those. On the MEATER 2 Plus / Pro specifically, this can also "
+                        "be the probe itself going quiet after a drop - it can stop "
+                        "advertising or refuse connections until it is power-cycled on "
+                        "its charger, which is outside what Home Assistant or the proxy "
+                        "can influence.",
                         self.address,
                     )
                 else:
@@ -550,27 +543,10 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
                     self.address,
                     disconnected_callback=self._async_on_disconnect,
                     max_attempts=_MAX_CONNECT_ATTEMPTS,
-                    ble_device_callback=lambda: (
-                        bluetooth.async_ble_device_from_address(
-                            self.hass, self.address, connectable=True
-                        )
-                        or self._last_ble_device
+                    ble_device_callback=lambda: bluetooth.async_ble_device_from_address(
+                        self.hass, self.address, connectable=True
                     ),
                 )
-            except BleakOutOfConnectionSlotsError as err:
-                # The proxy has no free connection slot (e.g. more probes than slots). Retrying
-                # hard cannot help until a slot frees, so hold the backoff at its ceiling and
-                # suppress direct-connect attempts until a fresh advertisement shows the probe
-                # is reachable again.
-                _LOGGER.debug(
-                    "MEATER %s: proxy out of connection slots (%s); backing off",
-                    self.address,
-                    err,
-                )
-                self._out_of_slots = True
-                self._reconnect_backoff = _RECONNECT_COOLDOWN_MAX
-                retry = True
-                return
             except (BleakError, asyncio.TimeoutError) as err:
                 _LOGGER.debug(
                     "MEATER %s connection attempt failed (%s)", self.address, err
@@ -609,7 +585,6 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
                 batt_raw = await client.read_gatt_char(CHAR_BATTERY)
             self._client = client
             self._connected = True
-            self._last_ble_device = ble_device
             self._expected_disconnect = False
             # Back to a healthy link: drop the backoff to its floor, clear the
             # no-path counter, and end any grace window from a previous drop.
@@ -844,6 +819,7 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
                 ambient_temp=prev.ambient_temp if prev else None,
                 battery=battery,
                 cook_state=prev.cook_state if prev else "idle",
+                rssi=self._last_rssi,
             )
         )
 
@@ -894,6 +870,7 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
                 ambient_temp=ambient,
                 battery=battery,
                 cook_state=cook_state,
+                rssi=self._last_rssi,
             )
         )
 

@@ -12,7 +12,12 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, UnitOfTemperature
+from homeassistant.const import (
+    PERCENTAGE,
+    SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
+    EntityCategory,
+    UnitOfTemperature,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -72,9 +77,11 @@ async def async_setup_entry(
 ) -> None:
     """Add MEATER BLE sensors from a config entry."""
     coordinator: MeaterBLECoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(
+    entities: list[SensorEntity] = [
         MeaterSensor(coordinator, description) for description in SENSOR_DESCRIPTIONS
-    )
+    ]
+    entities.append(MeaterSignalSensor(coordinator))
+    async_add_entities(entities)
 
 
 class MeaterSensor(MeaterBaseEntity, SensorEntity):
@@ -97,3 +104,45 @@ class MeaterSensor(MeaterBaseEntity, SensorEntity):
         if self.coordinator.data is None:
             return None
         return self.entity_description.value_fn(self.coordinator.data)
+
+
+class MeaterSignalSensor(MeaterBaseEntity, SensorEntity):
+    """Diagnostic: RSSI of the probe's most recently seen advertisement.
+
+    The probe does not advertise while a GATT connection is held (see the coordinator
+    module docstring), so this freezes at whatever it was just before connecting, or
+    since the last drop - it is not a live connection signal. Still useful for judging
+    whether a weak signal is contributing to drops. Disabled by default, like other
+    diagnostic entities, since most users only need the cook data.
+    """
+
+    _attr_translation_key = "signal_strength"
+    _attr_device_class = SensorDeviceClass.SIGNAL_STRENGTH
+    _attr_native_unit_of_measurement = SIGNAL_STRENGTH_DECIBELS_MILLIWATT
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: MeaterBLECoordinator) -> None:
+        """Initialize."""
+        super().__init__(coordinator, "rssi")
+
+    @property
+    def available(self) -> bool:
+        """Available once any advertisement has been seen, independent of connection.
+
+        Unlike the data sensors (gated on ``coordinator.available``, i.e. connected or
+        in the grace window), a stale-but-present last-advertisement RSSI is useful
+        precisely while the probe is NOT connected - e.g. while troubleshooting why it
+        will not connect at all.
+        """
+        return (
+            self.coordinator.data is not None and self.coordinator.data.rssi is not None
+        )
+
+    @property
+    def native_value(self) -> int | None:
+        """Return the last-seen advertisement RSSI, if any."""
+        if self.coordinator.data is None:
+            return None
+        return self.coordinator.data.rssi
