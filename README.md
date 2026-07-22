@@ -109,6 +109,7 @@ All entities are grouped under one device per probe.
 | Ambient Temperature | Surrounding grill/oven temperature | °C | `temperature` |
 | Battery | Probe battery level | % | `battery` |
 | Cook Status | Current cook state (see below) | - | `enum` |
+| Signal Strength | RSSI of the probe's last-seen advertisement (diagnostic, disabled by default). Freezes while connected - the probe does not advertise then - so it reflects signal quality just before connecting or since the last drop, not a live connection signal. | dBm | `signal_strength` |
 
 ### Cook Status States
 

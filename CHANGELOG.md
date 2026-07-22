@@ -2,16 +2,33 @@
 
 All notable changes to this integration are documented here.
 
+## [2026.6.12] - 2026-07-20
+
+### Added
+
+- **A diagnostic signal-strength sensor** ([#5](https://github.com/Emkraan/homeassistant-meater/issues/5)). Reports the RSSI of the probe's most recently seen advertisement. Disabled by default (enable it from the device's entities if you want it). The probe does not advertise while a GATT connection is held, so this freezes at whatever it was just before connecting, or since the last drop; it is not a live connection signal, but it is useful for judging whether a weak signal is contributing to drops.
+
+### Changed
+
+- **Reverted the direct connect-by-address reconnect attempt from the 2026.6.12 betas** ([#5](https://github.com/Emkraan/homeassistant-meater/issues/5)). Field testing, plus tracing the actual Home Assistant Bluetooth stack, showed it cannot recover a drop in the situation it targets: Home Assistant only opens a Bluetooth connection to an address a connectable scanner has recently heard, regardless of whether a cached device object is supplied, so the attempt only added failed connection attempts on every retry without recovering anything. Reconnection is back to the 2026.6.11 advertisement-driven path (keepalive read + advertisement callback + escalating backoff), which is what the hardware testing actually showed working.
+- Reworded the "no connectable path" warning and reconnection notes to reflect what field testing has shown, without asserting more than that.
+
+### Note
+
+- **What field testing has shown about the MEATER 2 Plus / Pro not reconnecting on its own after a drop** ([#5](https://github.com/Emkraan/homeassistant-meater/issues/5)). Across two independent reports, a 2 Plus that drops its connection can stop sending connectable advertisements, or start refusing/stalling connections, until it is power-cycled on its charger, even with a strong signal beforehand and even while a phone can still see it in a scan. Bluetooth gives no central device (a phone, an ESP32 proxy, or this integration) a way to open a connection to, or wake, a peripheral that is not advertising connectably, so this is outside what Home Assistant or the proxy can influence; the original MEATER does not show this behavior on the same hardware. The keepalive read remains the effective mitigation, since it avoids the drop for hours at a time with a solid signal rather than needing to recover from one.
+
 ## [2026.6.12b2] - 2026-07-19
 
-Beta. Enable beta versions in HACS to install it.
+Beta. Enable beta versions in HACS to install it. Superseded by 2026.6.12 above (the direct connect-by-address approach introduced in 2026.6.12b1 and gated further here did not hold up under hardware testing and was reverted).
 
 ### Changed
 
 - **Reconnect no longer forces repeated system-wide active scans** ([#5](https://github.com/Emkraan/homeassistant-meater/issues/5)). The 2026.6.12b1 reconnect path asked Home Assistant to run an on-demand active scan while a probe was disconnected. That request is system-wide (every proxy scans), and with more than one probe disconnected it repeated continuously, which on a single-radio ESP32 competes with the probes that are still connected and can shorten how long they hold. The active-scan request is removed; the direct connect-by-address introduced in 2026.6.12b1 already starts the proxy's own scan for the probe, so re-seeing it does not depend on it.
 - **A probe with no free connection slot stops retrying hard** ([#5](https://github.com/Emkraan/homeassistant-meater/issues/5)). An ESP32/ESPHome proxy has a fixed number of connection slots (three by default). When more probes than slots are set up on one proxy, the extra probe cannot connect; it now recognizes the out-of-slots condition, backs off to the maximum interval, and stops issuing connect attempts until it is seen advertising again, instead of churning connect attempts that compete with the connected probes. To run more probes on one proxy, raise `connection_slots` in its ESPHome config (default 3, up to 9, 5 or fewer recommended).
 
-Beta. Enable beta versions in HACS to install it.
+## [2026.6.12b1] - 2026-07-17
+
+Beta. Superseded by 2026.6.12 above - hardware testing showed this approach cannot recover a drop (Home Assistant will not open a connection to an address no scanner currently hears, regardless of the cached device used here), so it was reverted.
 
 ### Added
 
@@ -20,6 +37,8 @@ Beta. Enable beta versions in HACS to install it.
 ### Note
 
 - This targets the post-drop reconnect, not the ~24-30 minute supervision-timeout drop itself (that remains a link-layer event the keepalive read only makes less frequent). It also cannot help when the proxy's radio is genuinely wedged (a leaked connection slot, or a scanner that does not restart after a connection); those need a proxy restart on a current ESPHome build, since no Home Assistant call can free a remote proxy's slot. This is a beta so the reconnect path can be confirmed on real hardware before it ships to stable.
+
+## [2026.6.11] - 2026-07-17
 
 ### Added
 
