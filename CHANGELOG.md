@@ -2,6 +2,17 @@
 
 All notable changes to this integration are documented here.
 
+## [2026.8.1] - 2026-08-02
+
+### Added
+
+- **MEATER Block / Smart Charger detection and labeling** ([#5](https://github.com/Emkraan/homeassistant-meater/issues/5)). The MEATER Block and Smart Charger act as BLE relays for a docked probe and expose the same GATT temperature/battery interface as the probe directly. The integration now detects this device pattern (MEATER manufacturer ID, Device Information Service only, no probe or dock service UUID) and labels it "MEATER Block {address}" in the setup flow instead of the generic "MEATER {address}", making it easier to distinguish from a probe when adding it.
+
+### Changed
+
+- **"No connectable path" warning now mentions the Block as an alternative** ([#5](https://github.com/Emkraan/homeassistant-meater/issues/5)). When a MEATER 2 Plus / Pro repeatedly has no connectable path (the signature of the probe going quiet after a drop), the warning now suggests connecting to the MEATER Block or Smart Charger as an alternative - it keeps advertising after a BLE drop where the probe does not.
+- **Troubleshooting table updated** to document the MEATER 2 Plus / Pro post-drop no-reconnect scenario and the Block connection as a solution.
+
 ## [2026.6.12] - 2026-07-20
 
 ### Added

@@ -66,15 +66,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from dataclasses import dataclass
-from datetime import timedelta
 import logging
 import struct
+from dataclasses import dataclass
+from datetime import timedelta
 
 from bleak.backends.characteristic import BleakGATTCharacteristic
 from bleak.exc import BleakError
 from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
-
 from homeassistant.components import bluetooth
 from homeassistant.components.bluetooth import (
     BluetoothCallbackMatcher,
@@ -265,9 +264,12 @@ def _derive_cook_state(tip: float, prev_state: str, prev_tip: float | None) -> s
     """Derive cook state from tip temperature."""
     if tip < 30.0:
         return "idle"
-    if prev_state in ("cooking",) and prev_tip is not None:
-        if tip < prev_tip - COOK_REST_DELTA:
-            return "resting"
+    if (
+        prev_state in ("cooking",)
+        and prev_tip is not None
+        and tip < prev_tip - COOK_REST_DELTA
+    ):
+        return "resting"
     return "cooking"
 
 
@@ -526,7 +528,11 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
                         "be the probe itself going quiet after a drop - it can stop "
                         "advertising or refuse connections until it is power-cycled on "
                         "its charger, which is outside what Home Assistant or the proxy "
-                        "can influence.",
+                        "can influence. If you have a MEATER Block or Smart Charger, "
+                        "connecting to that device instead of the probe directly is an "
+                        "alternative worth trying - it shows up as a separate device "
+                        "in the integration setup flow and keeps advertising after "
+                        "drops where the probe does not.",
                         self.address,
                     )
                 else:

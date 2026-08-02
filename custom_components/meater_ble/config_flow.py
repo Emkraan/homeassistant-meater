@@ -6,7 +6,6 @@ import logging
 from typing import Any
 
 import voluptuous as vol
-
 from homeassistant.components import bluetooth
 from homeassistant.components.bluetooth import (
     BluetoothServiceInfoBleak,
@@ -47,6 +46,10 @@ _LOGGER = logging.getLogger(__name__)
 # the charger/dock. Used to avoid auto-adding the un-connectable dock (see #2).
 _PROBE_SERVICE_UUIDS = {MEATER_SERVICE_UUID.lower(), MEATER_PRO_SERVICE_UUID.lower()}
 
+# Standard Device Information Service UUID (Bluetooth SIG 0x180A). Broadcast by the
+# MEATER Block / Smart Charger relay but not by probes or the dock.
+_DEVICE_INFO_SERVICE_UUID = "0000180a-0000-1000-8000-00805f9b34fb"
+
 
 def _is_meater(discovery_info: BluetoothServiceInfoBleak) -> bool:
     """Return True if a BLE advertisement looks like a MEATER probe or dock.
@@ -65,6 +68,26 @@ def _is_meater(discovery_info: BluetoothServiceInfoBleak) -> bool:
     return name.startswith("meater")
 
 
+def _is_block_relay(discovery_info: BluetoothServiceInfoBleak) -> bool:
+    """Return True if this looks like a MEATER Block or Smart Charger acting as a relay.
+
+    Distinct from a probe (which advertises a proprietary service UUID) and the
+    un-connectable dock (which advertises dcbb67ca): this device carries only the
+    standard Device Information Service (0x180A) plus the MEATER manufacturer ID.
+    Field reports confirm it exposes the same GATT temperature/battery interface as a
+    MEATER Pro probe and keeps advertising after BLE supervision timeouts where the
+    probe itself can go quiet (see #5).
+    """
+    if MEATER_MANUFACTURER_ID not in discovery_info.manufacturer_data:
+        return False
+    advertised = {uuid.lower() for uuid in discovery_info.service_uuids}
+    return (
+        _DEVICE_INFO_SERVICE_UUID in advertised
+        and not (advertised & _PROBE_SERVICE_UUIDS)
+        and MEATER_DOCK_SERVICE_UUID.lower() not in advertised
+    )
+
+
 def _is_dock_only(discovery_info: BluetoothServiceInfoBleak) -> bool:
     """Return True if the advertisement is the charger/dock and NOT a probe.
 
@@ -80,10 +103,12 @@ def _is_dock_only(discovery_info: BluetoothServiceInfoBleak) -> bool:
 
 
 def _title(discovery_info: BluetoothServiceInfoBleak) -> str:
-    """Human title for a discovered probe."""
+    """Human title for a discovered probe or relay."""
     name = discovery_info.name
     if name and name.lower() != discovery_info.address.lower():
         return name
+    if _is_block_relay(discovery_info):
+        return f"MEATER Block {discovery_info.address}"
     return f"MEATER {discovery_info.address}"
 
 
