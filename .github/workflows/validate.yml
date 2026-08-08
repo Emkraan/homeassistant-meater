@@ -7,18 +7,7 @@ on:
     - cron: "0 0 * * 0"
 
 jobs:
-  hassfest:
-    name: hassfest
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: home-assistant/actions/hassfest@master
-
-  hacs:
-    name: HACS
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: hacs/action@main
-        with:
-          category: integration
+  validate:
+    uses: Emkraan/ha-shared-workflows/.github/workflows/validate-integration.yml@main
+    with:
+      hacs-category: integration
