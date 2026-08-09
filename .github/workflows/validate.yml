@@ -11,3 +11,17 @@ jobs:
     uses: Emkraan/ha-shared-workflows/.github/workflows/validate-integration.yml@main
     with:
       hacs-category: integration
+
+  ci:
+    name: ci
+    needs: [validate]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Report pass
+        if: ${{ !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
+        run: echo "All checks passed"
+      - name: Report fail
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+        run: exit 1
+
