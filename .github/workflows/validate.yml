@@ -12,9 +12,38 @@ jobs:
     with:
       hacs-category: integration
 
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: No em dashes
+        run: |
+          python3 - << 'PYEOF'
+          import sys, pathlib
+          DASHES = '\u2013\u2014\u2015'
+          SKIP = {'.git', '.github', 'node_modules', '__pycache__', 'dist', 'build', '.venv'}
+          found = False
+          for path in sorted(pathlib.Path('.').rglob('*.md')):
+              if any(p in SKIP for p in path.parts):
+                  continue
+              try:
+                  lines = path.read_text(encoding='utf-8', errors='replace').splitlines()
+              except Exception as e:
+                  print(f'::warning::Could not read {path}: {e}')
+                  continue
+              for lineno, line in enumerate(lines, 1):
+                  if any(ch in line for ch in DASHES):
+                      print(f'::error file={path},line={lineno}::Em/en dash found. Use a hyphen, comma, or colon.')
+                      found = True
+          if found:
+              sys.exit(1)
+          PYEOF
+
   ci:
     name: ci
-    needs: [validate]
+    needs: [validate, check]
     runs-on: ubuntu-latest
     if: always()
     steps:

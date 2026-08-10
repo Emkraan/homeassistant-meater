@@ -28,6 +28,7 @@ on:
     branches: [main]
   push:
     branches: [main]
+  merge_group:
 
 permissions:
   contents: read
@@ -59,6 +60,12 @@ jobs:
           # deploy bot's pin-backs, and Renovate's dependency updates. Exempt them
           # so the required check never blocks their auto-merge. Human PRs still go
           # through the gate below.
+          # Merge queue: freshness was already verified on the PR; skip.
+          if [ "$EVENT_NAME" = "merge_group" ]; then
+            echo "::notice::merge_group event - freshness gate skipped."
+            exit 0
+          fi
+
           if [ "$ACTOR" = "dependabot[bot]" ] || [ "$ACTOR" = "github-actions[bot]" ] \
              || [ "$ACTOR" = "renovate[bot]" ]; then
             echo "::notice::actor $ACTOR is a mechanical bot; freshness gate skipped."
