@@ -3,6 +3,7 @@ name: Validate
 on:
   push:
   pull_request:
+  merge_group:
   schedule:
     - cron: "0 0 * * 0"
 
@@ -53,4 +54,3 @@ jobs:
       - name: Report fail
         if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
         run: exit 1
-
