@@ -1,4 +1,4 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["github>Emkraan/.github//renovate.json"]
+  "extends": ["github>Emkraan/.github"]
 }
