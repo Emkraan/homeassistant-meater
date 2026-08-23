@@ -1,27 +1,85 @@
 name: automerge
 
-# Repo-level auto-merge: enable GitHub auto-merge on every non-draft PR so it
-# merges the moment branch protection is satisfied (required reviews + checks).
-# GitHub's auto-merge is per-PR by design; this makes it automatic per repo.
+# Repo-level auto-merge that works on BOTH plain repos and merge-queue repos.
+#
+# Plain repos: enable GitHub auto-merge (squash) so the PR merges when branch
+# protection is satisfied.
+# Merge-queue repos: GitHub auto-merge does NOT reliably add a PR to the queue,
+# so once the PR is mergeable we call the enqueuePullRequest GraphQL mutation
+# explicitly. It fires on check completion (not just PR open) so the PR is
+# actually ready when we try.
+#
+# Branch protection (required reviews/checks) still fully applies either way.
 
 on:
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
+  pull_request_review:
+    types: [submitted]
+  check_suite:
+    types: [completed]
 
 permissions:
   contents: write
   pull-requests: write
 
 concurrency:
-  group: automerge-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  group: automerge-${{ github.event.pull_request.number || github.event.check_suite.id }}
+  cancel-in-progress: false
 
 jobs:
-  enable-auto-merge:
-    if: ${{ !github.event.pull_request.draft }}
+  automerge:
     runs-on: ubuntu-latest
     steps:
-      - name: Enable squash auto-merge
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh pr merge --auto --squash "${{ github.event.pull_request.number }}" --repo "${{ github.repository }}"
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+
+            // Collect candidate PR numbers from whatever event fired.
+            let numbers = [];
+            if (context.eventName === 'pull_request' || context.eventName === 'pull_request_review') {
+              numbers = [context.payload.pull_request.number];
+            } else if (context.eventName === 'check_suite') {
+              numbers = (context.payload.check_suite.pull_requests || []).map(p => p.number);
+            }
+            if (numbers.length === 0) { core.info('no candidate PRs'); return; }
+
+            const Q = `query($o:String!,$r:String!,$n:Int!){
+              repository(owner:$o,name:$r){
+                mergeQueue{ id }
+                pullRequest(number:$n){
+                  id number isDraft state merged isInMergeQueue mergeStateStatus
+                }
+              }
+            }`;
+            const ENQUEUE = `mutation($id:ID!){ enqueuePullRequest(input:{pullRequestId:$id}){ mergeQueueEntry{ position } } }`;
+            const AUTOMERGE = `mutation($id:ID!){ enablePullRequestAutoMerge(input:{pullRequestId:$id, mergeMethod:SQUASH}){ pullRequest{ number } } }`;
+            const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+            for (const n of numbers) {
+              // mergeStateStatus is computed async; retry briefly on UNKNOWN.
+              let data;
+              for (let i = 0; i < 6; i++) {
+                data = await github.graphql(Q, {o: owner, r: repo, n});
+                if (data.repository.pullRequest.mergeStateStatus !== 'UNKNOWN') break;
+                await sleep(5000);
+              }
+              const pr = data.repository.pullRequest;
+              const hasQueue = !!data.repository.mergeQueue;
+              if (!pr || pr.state !== 'OPEN' || pr.merged) { core.info(`#${n}: not an open PR`); continue; }
+              if (pr.isDraft) { core.info(`#${n}: draft, skipping`); continue; }
+              if (pr.isInMergeQueue) { core.info(`#${n}: already in merge queue`); continue; }
+
+              if (hasQueue) {
+                if (pr.mergeStateStatus === 'CLEAN') {
+                  try { await github.graphql(ENQUEUE, {id: pr.id}); core.info(`#${n}: enqueued`); }
+                  catch (e) { core.info(`#${n}: enqueue not accepted yet (${e.message})`); }
+                } else {
+                  core.info(`#${n}: mergeStateStatus=${pr.mergeStateStatus}, waiting for a later check_suite event`);
+                }
+              } else {
+                try { await github.graphql(AUTOMERGE, {id: pr.id}); core.info(`#${n}: auto-merge enabled`); }
+                catch (e) { core.info(`#${n}: auto-merge enable skipped (${e.message})`); }
+              }
+            }
