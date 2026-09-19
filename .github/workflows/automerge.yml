@@ -18,6 +18,9 @@ on:
     types: [submitted]
   check_suite:
     types: [completed]
+  schedule:
+    - cron: "7,37 * * * *"
+  workflow_dispatch: {}
 
 permissions:
   contents: write
@@ -42,6 +45,13 @@ jobs:
               numbers = [context.payload.pull_request.number];
             } else if (context.eventName === 'check_suite') {
               numbers = (context.payload.check_suite.pull_requests || []).map(p => p.number);
+            }
+            if ((context.eventName === 'schedule' || context.eventName === 'workflow_dispatch') && numbers.length === 0) {
+              // Safety-net sweep: every open, non-draft PR. Recovers a green PR that
+              // stranded with no pending event to re-fire the paths above (e.g. it fell
+              // out of the merge queue after enqueue).
+              const {data} = await github.rest.pulls.list({owner, repo, state: 'open', per_page: 100});
+              numbers = data.filter(p => !p.draft).map(p => p.number);
             }
             if (numbers.length === 0) { core.info('no candidate PRs'); return; }
 
