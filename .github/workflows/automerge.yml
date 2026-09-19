@@ -16,7 +16,8 @@ on:
     types: [opened, reopened, synchronize, ready_for_review]
   pull_request_review:
     types: [submitted]
-  check_suite:
+  workflow_run:
+    workflows: ["Validate"]
     types: [completed]
   schedule:
     - cron: "7,37 * * * *"
@@ -27,7 +28,7 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: automerge-${{ github.event.pull_request.number || github.event.check_suite.id }}
+  group: automerge-${{ github.event.pull_request.number || github.event.workflow_run.id }}
   cancel-in-progress: false
 
 jobs:
@@ -43,8 +44,8 @@ jobs:
             let numbers = [];
             if (context.eventName === 'pull_request' || context.eventName === 'pull_request_review') {
               numbers = [context.payload.pull_request.number];
-            } else if (context.eventName === 'check_suite') {
-              numbers = (context.payload.check_suite.pull_requests || []).map(p => p.number);
+            } else if (context.eventName === 'workflow_run') {
+              numbers = (context.payload.workflow_run.pull_requests || []).map(p => p.number);
             }
             if ((context.eventName === 'schedule' || context.eventName === 'workflow_dispatch') && numbers.length === 0) {
               // Safety-net sweep: every open, non-draft PR. Recovers a green PR that
@@ -86,7 +87,7 @@ jobs:
                   try { await github.graphql(ENQUEUE, {id: pr.id}); core.info(`#${n}: enqueued`); }
                   catch (e) { core.info(`#${n}: enqueue not accepted yet (${e.message})`); }
                 } else {
-                  core.info(`#${n}: mergeStateStatus=${pr.mergeStateStatus}, waiting for a later check_suite event`);
+                  core.info(`#${n}: mergeStateStatus=${pr.mergeStateStatus}, waiting for a later workflow_run event`);
                 }
               } else {
                 try { await github.graphql(AUTOMERGE, {id: pr.id}); core.info(`#${n}: auto-merge enabled`); }
