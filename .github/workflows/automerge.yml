@@ -37,3 +37,6 @@ jobs:
     uses: Emkraan/.github/.github/workflows/reusable-automerge.yml@main
     with:
       runs-on: '"ubuntu-latest"'
+      app-client-id: ${{ vars.DEPLOY_APP_ID }}
+    secrets:
+      app-private-key: ${{ secrets.DEPLOY_APP_PRIVATE_KEY }}
