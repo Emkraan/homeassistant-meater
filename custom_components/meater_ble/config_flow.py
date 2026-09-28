@@ -179,9 +179,7 @@ class MeaterBLEConfigFlow(ConfigFlow, domain=DOMAIN):
             description_placeholders=placeholders,
         )
 
-    async def async_step_user(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle a manual setup attempt - let the user pick a discovered probe.
 
         Auto-discovery relies on the probe's name/service UUID reaching HA, which does not
@@ -204,9 +202,7 @@ class MeaterBLEConfigFlow(ConfigFlow, domain=DOMAIN):
         current_addresses = self._async_current_ids(include_ignore=False)
         meater_devices: dict[str, str] = {}
         all_devices: dict[str, str] = {}
-        for discovery_info in async_discovered_service_info(
-            self.hass, connectable=True
-        ):
+        for discovery_info in async_discovered_service_info(self.hass, connectable=True):
             address = discovery_info.address
             if address in current_addresses:
                 continue
@@ -225,9 +221,7 @@ class MeaterBLEConfigFlow(ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="user",
-            data_schema=vol.Schema(
-                {vol.Required(CONF_ADDRESS): vol.In(self._discovered_devices)}
-            ),
+            data_schema=vol.Schema({vol.Required(CONF_ADDRESS): vol.In(self._discovered_devices)}),
         )
 
 
@@ -239,23 +233,17 @@ class MeaterBLEOptionsFlow(OptionsFlow):
     of more Bluetooth traffic. It has no effect on the original MEATER / MEATER+.
     """
 
-    async def async_step_init(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Manage the keepalive interval option."""
         if user_input is not None:
             return self.async_create_entry(data=user_input)
 
-        current = self.config_entry.options.get(
-            CONF_KEEPALIVE_INTERVAL, DEFAULT_KEEPALIVE_INTERVAL
-        )
+        current = self.config_entry.options.get(CONF_KEEPALIVE_INTERVAL, DEFAULT_KEEPALIVE_INTERVAL)
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
                 {
-                    vol.Required(
-                        CONF_KEEPALIVE_INTERVAL, default=current
-                    ): NumberSelector(
+                    vol.Required(CONF_KEEPALIVE_INTERVAL, default=current): NumberSelector(
                         NumberSelectorConfig(
                             min=KEEPALIVE_INTERVAL_MIN,
                             max=KEEPALIVE_INTERVAL_MAX,
