@@ -212,9 +212,7 @@ def _decode_ambient(data: bytes) -> float:
     tip_raw = data[0] + (data[1] << 8)
     ra = data[2] + (data[3] << 8)
     oa = data[4] + (data[5] << 8)
-    raw_ambient = tip_raw + max(
-        0.0, ((ra - min(AMBIENT_MIN_OFFSET, oa)) * 16 * 589) / 1487
-    )
+    raw_ambient = tip_raw + max(0.0, ((ra - min(AMBIENT_MIN_OFFSET, oa)) * 16 * 589) / 1487)
     return (raw_ambient + 8.0) / 16.0
 
 
@@ -264,11 +262,7 @@ def _derive_cook_state(tip: float, prev_state: str, prev_tip: float | None) -> s
     """Derive cook state from tip temperature."""
     if tip < 30.0:
         return "idle"
-    if (
-        prev_state in ("cooking",)
-        and prev_tip is not None
-        and tip < prev_tip - COOK_REST_DELTA
-    ):
+    if prev_state in ("cooking",) and prev_tip is not None and tip < prev_tip - COOK_REST_DELTA:
         return "resting"
     return "cooking"
 
@@ -426,10 +420,7 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
         contributing to drops. Skips small jitter so the sensor does not update on
         nearly every advertisement while disconnected (see ``_RSSI_UPDATE_THRESHOLD``).
         """
-        if (
-            self._last_rssi is not None
-            and abs(rssi - self._last_rssi) < _RSSI_UPDATE_THRESHOLD
-        ):
+        if self._last_rssi is not None and abs(rssi - self._last_rssi) < _RSSI_UPDATE_THRESHOLD:
             return
         self._last_rssi = rssi
         prev = self.data
@@ -459,9 +450,7 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
         if self._closing or self._connected:
             return
         delay = self._reconnect_backoff
-        self._reconnect_backoff = min(
-            self._reconnect_backoff * 2, _RECONNECT_COOLDOWN_MAX
-        )
+        self._reconnect_backoff = min(self._reconnect_backoff * 2, _RECONNECT_COOLDOWN_MAX)
         self._schedule_connect(delay)
 
     @callback
@@ -480,9 +469,7 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
             # Queue a cooldown attempt. Deliberately not gated on an in-flight task:
             # this is called from _async_connect's own finally, where the current
             # task has not yet returned.
-            self._cancel_reconnect = async_call_later(
-                self.hass, delay, self._async_reconnect_fire
-            )
+            self._cancel_reconnect = async_call_later(self.hass, delay, self._async_reconnect_fire)
             return
         if self._connecting:
             return
@@ -553,10 +540,8 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
                         self.hass, self.address, connectable=True
                     ),
                 )
-            except (BleakError, asyncio.TimeoutError) as err:
-                _LOGGER.debug(
-                    "MEATER %s connection attempt failed (%s)", self.address, err
-                )
+            except (TimeoutError, BleakError) as err:
+                _LOGGER.debug("MEATER %s connection attempt failed (%s)", self.address, err)
                 retry = True
                 return
             # Connected: from here a failure on the TEMPERATURE path must release the
@@ -564,7 +549,7 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
             try:
                 await client.start_notify(CHAR_TEMPERATURE, self._on_temp_notify)
                 temp_raw = await client.read_gatt_char(CHAR_TEMPERATURE)
-            except (BleakError, asyncio.TimeoutError) as err:
+            except (TimeoutError, BleakError) as err:
                 _LOGGER.debug(
                     "MEATER %s failed to subscribe after connecting (%s); "
                     "disconnecting to free the probe",
@@ -647,7 +632,7 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
         if client is not None and client.is_connected:
             try:
                 await asyncio.wait_for(client.disconnect(), timeout=_DISCONNECT_TIMEOUT)
-            except (BleakError, asyncio.TimeoutError) as err:
+            except (TimeoutError, BleakError) as err:
                 _LOGGER.debug("MEATER %s error on disconnect: %s", self.address, err)
 
     # ------------------------------------------------------------------
@@ -710,10 +695,8 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
                     client.read_gatt_char(CHAR_TEMPERATURE), timeout=_READ_TIMEOUT
                 )
                 self._process(bytes(temp_raw), None)
-            except (BleakError, asyncio.TimeoutError, EOFError) as err:
-                _LOGGER.debug(
-                    "MEATER %s poll temperature read failed (%s)", self.address, err
-                )
+            except (TimeoutError, BleakError, EOFError) as err:
+                _LOGGER.debug("MEATER %s poll temperature read failed (%s)", self.address, err)
             # Battery: read on a slow cadence for every probe family, in its own suppressed
             # read so a battery-characteristic failure never disturbs the temperature path.
             # This is also how the Pro / 2 Plus 5-byte raw bytes are gathered (logged at
@@ -794,17 +777,13 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
     # ------------------------------------------------------------------
 
     @callback
-    def _on_temp_notify(
-        self, characteristic: BleakGATTCharacteristic, data: bytearray
-    ) -> None:
+    def _on_temp_notify(self, characteristic: BleakGATTCharacteristic, data: bytearray) -> None:
         """Handle a temperature characteristic notification."""
         # Battery arrives on its own characteristic; carry the last known value.
         self._process(bytes(data), None)
 
     @callback
-    def _on_batt_notify(
-        self, characteristic: BleakGATTCharacteristic, data: bytearray
-    ) -> None:
+    def _on_batt_notify(self, characteristic: BleakGATTCharacteristic, data: bytearray) -> None:
         """Handle a battery characteristic notification."""
         self._apply_battery(bytes(data))
 
@@ -836,9 +815,7 @@ class MeaterBLECoordinator(DataUpdateCoordinator[MeaterData]):
         variation across firmware.
         """
         if len(raw) == 5:
-            _LOGGER.debug(
-                "MEATER Pro %s battery raw (5 bytes): %s", self.address, raw.hex("-")
-            )
+            _LOGGER.debug("MEATER Pro %s battery raw (5 bytes): %s", self.address, raw.hex("-"))
             return _decode_battery_pro(raw)
         return _decode_battery(raw)
 

@@ -136,9 +136,7 @@ class MeaterSignalSensor(MeaterBaseEntity, SensorEntity):
         precisely while the probe is NOT connected - e.g. while troubleshooting why it
         will not connect at all.
         """
-        return (
-            self.coordinator.data is not None and self.coordinator.data.rssi is not None
-        )
+        return self.coordinator.data is not None and self.coordinator.data.rssi is not None
 
     @property
     def native_value(self) -> int | None:
