@@ -17,7 +17,7 @@ on:
     workflows: ["Validate"]
     types: [completed]
   schedule:
-    - cron: "7,37 * * * *"
+    - cron: "7 6,18 * * *"
   workflow_dispatch: {}
 
 permissions:
