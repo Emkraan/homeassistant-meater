@@ -1,0 +1,96 @@
+name: Eir task
+description: Work for Eir to pick up (homelab orchestrator).
+title: "[Eir]: "
+labels: ["eir"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This form applies the `eir` label, which is what routes the issue to Eir. Write it so someone with no other context can finish it: the goal, the proof it is done, and any links.
+        Home Assistant integration issues are often filed by outside users. Describe the work neutrally, never assign fault, and note that the reporter closes the issue (the agent uses `Refs #N`, never a closing keyword).
+
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What outcome do you want, in one or two sentences?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: work_type
+    attributes:
+      label: Type of work
+      options:
+        - Bug fix
+        - Feature
+        - Chore or maintenance
+        - Documentation
+        - Investigation (report back, no change)
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Checkable conditions that mean this is done, and how to verify each.
+      placeholder: "- [ ] ...\n- [ ] ..."
+    validations:
+      required: true
+
+  - type: input
+    id: integration_version
+    attributes:
+      label: Integration version (if relevant)
+      placeholder: "e.g. 2026.4.1"
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area of the integration
+      options:
+        - Config flow or options flow
+        - Coordinator or API client
+        - Entities or platforms
+        - Diagnostics or logging
+        - Translations or strings
+        - Docs, CI or release
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or diagnostics (optional)
+      description: Redact tokens, MAC addresses and account details first.
+      render: text
+
+  - type: dropdown
+    id: autonomy
+    attributes:
+      label: Autonomy
+      description: How far Eir may go without a human.
+      options:
+        - Investigate and report only
+        - Propose a change for sign-off
+        - Act and report
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context and links
+      description: Related issues, PRs, Apollo pages, logs, constraints.
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Checklist
+      options:
+        - label: This issue contains no secrets, tokens or credentials.
+          required: true
+        - label: I searched for an existing issue covering this work.
+          required: true
