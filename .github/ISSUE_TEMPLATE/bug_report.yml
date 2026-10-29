@@ -1,7 +1,7 @@
 name: Bug report
 description: Something is broken or behaving unexpectedly in the integration.
 title: "[Bug]: "
-labels: ["bug", "triage"]
+labels: ["type:bug", "triage"]
 body:
   - type: markdown
     attributes:
