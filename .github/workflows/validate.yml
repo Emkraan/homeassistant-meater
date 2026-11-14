@@ -54,7 +54,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Install ruff
-        run: pip install ruff==0.17.4
+        run: pip install ruff==0.17.5
 
       - name: Ruff lint
         run: ruff check .
